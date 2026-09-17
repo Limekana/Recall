@@ -5,6 +5,12 @@ const config: CapacitorConfig = {
   appName: 'Recall',
   webDir: 'dist',
   backgroundColor: '#0b0d0c',
+  plugins: {
+    SystemBars: {
+      insetsHandling: 'css',
+      initialViewportFitValueHint: 'cover'
+    }
+  },
   android: {
     allowMixedContent: false,
     backgroundColor: '#0b0d0c'
