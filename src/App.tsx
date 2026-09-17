@@ -10,22 +10,53 @@ import { StudyPage } from './pages/StudyPage';
 import { ReviewPage } from './pages/ReviewPage';
 import { TestPage } from './pages/TestPage';
 import { MatchPage } from './pages/MatchPage';
-import { RapidFirePage } from './pages/RapidFirePage';
+import { BlockBlastPage } from './pages/BlockBlastPage';
 import { ProgressPage } from './pages/ProgressPage';
+import { SyncPage } from './pages/SyncPage';
+import { RecallMark } from './components/RecallMark';
+import { useSyncStore } from './store/useSyncStore';
 
 export default function App() {
   const ready = useRecallStore((state) => state.ready);
   const error = useRecallStore((state) => state.error);
   const hydrate = useRecallStore((state) => state.hydrate);
+  const initializeSync = useSyncStore((state) => state.initialize);
+  const session = useSyncStore((state) => state.session);
+  const autoSync = useSyncStore((state) => state.autoSync);
 
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
 
+  useEffect(() => {
+    if (ready) void initializeSync();
+  }, [initializeSync, ready]);
+
+  useEffect(() => {
+    if (!ready || !session || !autoSync) return;
+    let timer: number | undefined;
+    const requestSync = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void useSyncStore.getState().syncNow(), 1400);
+    };
+    const unsubscribe = useRecallStore.subscribe((state, previous) => {
+      if (state.sets !== previous.sets || state.cards !== previous.cards || state.progress !== previous.progress || state.sessions !== previous.sessions) requestSync();
+    });
+    const onVisible = () => { if (document.visibilityState === 'visible') requestSync(); };
+    window.addEventListener('online', requestSync);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearTimeout(timer);
+      unsubscribe();
+      window.removeEventListener('online', requestSync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [autoSync, ready, session]);
+
   if (!ready) {
     return (
       <div className="launch-screen" aria-label="Opening Recall">
-        <div className="brand-mark brand-mark--large" aria-hidden="true">R</div>
+        <div className="brand-mark brand-mark--large"><RecallMark /></div>
         <p>Gathering your memories…</p>
       </div>
     );
@@ -53,8 +84,9 @@ export default function App() {
         <Route path="/review" element={<ReviewPage />} />
         <Route path="/test/:setId" element={<TestPage />} />
         <Route path="/match/:setId" element={<MatchPage />} />
-        <Route path="/rapid/:setId" element={<RapidFirePage />} />
+        <Route path="/blast/:setId" element={<BlockBlastPage />} />
         <Route path="/progress" element={<ProgressPage />} />
+        <Route path="/sync" element={<SyncPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>

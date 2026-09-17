@@ -4,6 +4,10 @@ dist
 .vscode
 *.local
 *.log
+.env
+.env.*
+!.env.example
+.vercel
 .DS_Store
 android/.gradle
 android/build

@@ -3,6 +3,7 @@ import { ArrowRight, BookOpenCheck, Plus, Sparkles } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SetCard } from '../components/SetCard';
 import { SetEditor } from '../components/SetEditor';
+import { RecallMark } from '../components/RecallMark';
 import { getDueCards } from '../engine/learningEngine';
 import { useRecallStore } from '../store/useRecallStore';
 
@@ -50,11 +51,11 @@ export function HomePage() {
 
       {activeSets.length === 0 ? (
         <section className="first-run">
-          <div className="first-run__orbit" aria-hidden="true"><span>R</span></div>
+          <div className="first-run__orbit" aria-hidden="true"><RecallMark /></div>
           <div>
             <p className="eyebrow">Your memory, under your control</p>
             <h2>Build a library that lives on this device.</h2>
-            <p>Create cards by hand or paste straight from a spreadsheet. Recall adapts with clear rules—no account, no AI, no mystery.</p>
+            <p>Create cards by hand or paste straight from a spreadsheet. Recall adapts with clear rules—no account required, no AI, no mystery.</p>
             <div className="button-row">
               <button className="button button--primary" onClick={() => setEditorOpen(true)}><Plus size={18} /> Create your first set</button>
               <button className="button button--secondary" onClick={() => void addStarter()} disabled={starting}>

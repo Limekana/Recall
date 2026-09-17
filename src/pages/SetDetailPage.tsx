@@ -8,8 +8,8 @@ import {
   ClipboardCheck,
   Copy,
   Edit3,
-  Flame,
   Gamepad2,
+  Grid3X3,
   Import,
   MoreHorizontal,
   Plus,
@@ -29,7 +29,7 @@ const studyModes = [
   { key: 'learn', title: 'Learn', description: 'Adaptive questions that grow with you', icon: BrainCircuit, path: 'study' },
   { key: 'test', title: 'Test', description: 'Check what you can recall unaided', icon: ClipboardCheck, path: 'test' },
   { key: 'match', title: 'Match', description: 'Pair terms against the clock', icon: Gamepad2, path: 'match' },
-  { key: 'rapid', title: 'Rapid Fire', description: 'Build a streak under pressure', icon: Flame, path: 'rapid' }
+  { key: 'blast', title: 'Block Blast', description: 'Recall cards to build and clear', icon: Grid3X3, path: 'blast' }
 ] as const;
 
 export function SetDetailPage() {

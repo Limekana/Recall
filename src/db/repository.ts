@@ -1,11 +1,12 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Card, CardProgress, StudySession, StudySet } from '../types';
+import type { Card, CardProgress, RecallSnapshot, StudySession, StudySet, SyncMetadata } from '../types';
 
 class RecallDatabase extends Dexie {
   sets!: EntityTable<StudySet, 'id'>;
   cards!: EntityTable<Card, 'id'>;
   progress!: EntityTable<CardProgress, 'cardId'>;
   sessions!: EntityTable<StudySession, 'id'>;
+  syncMeta!: EntityTable<SyncMetadata, 'id'>;
 
   constructor() {
     super('recall-local');
@@ -14,6 +15,13 @@ class RecallDatabase extends Dexie {
       cards: 'id, setId, starred, updatedAt',
       progress: 'cardId, mastery, nextReview',
       sessions: 'id, setId, mode, finishedAt'
+    });
+    this.version(2).stores({
+      sets: 'id, title, subject, archived, updatedAt',
+      cards: 'id, setId, starred, updatedAt',
+      progress: 'cardId, mastery, nextReview',
+      sessions: 'id, setId, mode, finishedAt',
+      syncMeta: 'id'
     });
   }
 }
@@ -33,6 +41,10 @@ export interface RecallRepository {
   putSession(session: StudySession): Promise<void>;
   deleteCard(cardId: string): Promise<void>;
   deleteSet(setId: string): Promise<void>;
+  exportSnapshot(): Promise<RecallSnapshot>;
+  replaceSnapshot(snapshot: RecallSnapshot): Promise<void>;
+  loadSyncMetadata(): Promise<SyncMetadata | undefined>;
+  putSyncMetadata(metadata: SyncMetadata): Promise<void>;
 }
 
 export class DexieRecallRepository implements RecallRepository {
@@ -77,6 +89,29 @@ export class DexieRecallRepository implements RecallRepository {
       await db.progress.bulkDelete(cardIds);
       await db.sessions.where('setId').equals(setId).delete();
     });
+  }
+
+  async exportSnapshot(): Promise<RecallSnapshot> {
+    const data = await this.loadAll();
+    return { version: 1, ...data };
+  }
+
+  async replaceSnapshot(snapshot: RecallSnapshot) {
+    await db.transaction('rw', db.sets, db.cards, db.progress, db.sessions, async () => {
+      await Promise.all([db.sets.clear(), db.cards.clear(), db.progress.clear(), db.sessions.clear()]);
+      if (snapshot.sets.length) await db.sets.bulkPut(snapshot.sets);
+      if (snapshot.cards.length) await db.cards.bulkPut(snapshot.cards);
+      if (snapshot.progress.length) await db.progress.bulkPut(snapshot.progress);
+      if (snapshot.sessions.length) await db.sessions.bulkPut(snapshot.sessions);
+    });
+  }
+
+  async loadSyncMetadata() {
+    return db.syncMeta.get('primary');
+  }
+
+  async putSyncMetadata(metadata: SyncMetadata) {
+    await db.syncMeta.put(metadata);
   }
 }
 

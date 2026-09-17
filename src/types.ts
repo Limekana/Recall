@@ -1,4 +1,4 @@
-export type StudyMode = 'flashcards' | 'learn' | 'review' | 'test' | 'match' | 'rapid';
+export type StudyMode = 'flashcards' | 'learn' | 'review' | 'test' | 'match' | 'rapid' | 'blast';
 export type QuestionKind = 'choice' | 'typed' | 'true-false';
 
 export interface StudySet {
@@ -66,4 +66,23 @@ export interface ImportRow {
   cells: string[];
   valid: boolean;
   error?: string;
+}
+
+export interface RecallSnapshot {
+  version: 1;
+  sets: StudySet[];
+  cards: Card[];
+  progress: CardProgress[];
+  sessions: StudySession[];
+}
+
+export interface SyncMetadata {
+  id: 'primary';
+  userId: string | null;
+  deviceId: string;
+  deviceLabel: string;
+  lastSyncedRevision: number;
+  lastSyncedHash: string;
+  lastSyncedAt: number | null;
+  autoSync: boolean;
 }

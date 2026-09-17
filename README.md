@@ -1,6 +1,6 @@
 # Recall
 
-Recall is a local-first flashcard study app for Android and the web. It focuses on fast set creation, transparent adaptive learning, scheduled review, tests, and lightweight games—without requiring an account, a backend, or AI.
+Recall is a local-first flashcard study app for Android and the web. It focuses on fast set creation, transparent adaptive learning, scheduled review, tests, and lightweight games. An account is optional and exists only for cross-device sync.
 
 ## What is included
 
@@ -10,8 +10,10 @@ Recall is a local-first flashcard study app for Android and the web. It focuses 
 - Deterministic Learn mode that shifts from recognition to typed recall as mastery grows
 - Due-card Review mode with explainable intervals
 - Configurable tests with multiple choice, written recall, and true/false questions
-- Match and Rapid Fire games with locally stored results
+- Match and Block Blast games with locally stored results
 - Local progress and session history using IndexedDB via Dexie
+- Optional email-based sync between Android and the web
+- Explicit conflict resolution when two devices change the same library
 - Installable offline PWA and a Capacitor Android project
 - Unit tests for scheduling, mastery, due-card selection, importing, and answer comparison
 
@@ -32,6 +34,19 @@ npm run build
 
 The static production build is written to `dist/` and can be deployed to Vercel or any static host. Client navigation uses URL hashes, so no rewrite rule is required.
 
+## Optional cross-device sync
+
+Recall remains complete without an account or network connection. To enable sync, provide these build-time environment variables in local builds and Vercel:
+
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_PUBLISHABLE_KEY
+```
+
+`VITE_SUPABASE_ANON_KEY` is also accepted for older Supabase projects. Apply `supabase/migrations/20260917_recall_sync.sql` to the selected Supabase project before enabling the variables.
+
+Sync stores one private snapshot per authenticated user behind row-level security. Every write carries the last known cloud revision. If the cloud and device both changed, Recall pauses and asks which complete library to keep; it never silently merges or overwrites divergent copies.
+
 ## Run on Android
 
 Android Studio and a JDK compatible with the installed Android Gradle plugin are required.
@@ -49,9 +64,11 @@ The UI, learning engine, and persistence are intentionally separate:
 
 ```text
 React UI → pure study engine → RecallRepository → Dexie / IndexedDB
+                                      ↕ optional snapshot sync
+                              Supabase Auth + Postgres RLS
 ```
 
-`src/engine/learningEngine.ts` accepts current card state plus an answer event and returns the next state. The repository interface in `src/db/repository.ts` keeps local persistence replaceable if optional sync is added later.
+`src/engine/learningEngine.ts` accepts current card state plus an answer event and returns the next state. Dexie remains the authoritative working copy; the sync layer exports and restores complete versioned snapshots through the repository boundary.
 
 ## Learning model
 
@@ -67,5 +84,4 @@ The engine can later be replaced with FSRS without changing the UI or storage bo
 
 ## Privacy and offline behavior
 
-All sets, cards, progress, and session history remain in the browser or app WebView database. Recall makes no network requests after installation and has no analytics or account system.
-
+All sets, cards, progress, and session history remain in the browser or app WebView database. Recall has no analytics. Network requests occur only when a user opts into sync, and signing out does not delete local study data.

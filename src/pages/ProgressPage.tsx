@@ -1,4 +1,4 @@
-import { BarChart3, BrainCircuit, CalendarDays, CheckCircle2, Clock3, Flame, Layers3 } from 'lucide-react';
+import { BarChart3, BrainCircuit, CalendarDays, CheckCircle2, Clock3, Flame, Grid3X3, Layers3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { MasteryBar } from '../components/MasteryBar';
 import { PageHeader } from '../components/PageHeader';
@@ -12,7 +12,8 @@ const modeNames = {
   review: 'Review',
   test: 'Test',
   match: 'Match',
-  rapid: 'Rapid Fire'
+  rapid: 'Rapid Fire',
+  blast: 'Block Blast'
 };
 
 export function ProgressPage() {
@@ -78,7 +79,13 @@ export function ProgressPage() {
           <div className="section-heading"><div><p className="eyebrow">Recent activity</p><h2>Session history</h2></div></div>
           {sessions.slice().sort((a, b) => b.finishedAt - a.finishedAt).slice(0, 8).map((session) => {
             const studySet = sets.find((item) => item.id === session.setId);
-            return <div className="session-row" key={session.id}><div className={`session-row__icon session-row__icon--${session.mode}`}>{session.mode === 'rapid' ? <Flame size={17} /> : <CheckCircle2 size={17} />}</div><div><strong>{modeNames[session.mode]}</strong><span>{studySet?.title ?? 'Mixed review'} · {formatRelativeDate(session.finishedAt)}</span></div><em>{session.mode === 'match' ? `${session.metadata?.seconds ?? '—'}s` : session.total ? `${Math.round((session.score / session.total) * 100)}%` : '—'}</em></div>;
+            const SessionIcon = session.mode === 'rapid' ? Flame : session.mode === 'blast' ? Grid3X3 : CheckCircle2;
+            const result = session.mode === 'match'
+              ? `${session.metadata?.seconds ?? '—'}s`
+              : session.mode === 'blast'
+                ? Number(session.metadata?.score ?? 0).toLocaleString()
+                : session.total ? `${Math.round((session.score / session.total) * 100)}%` : '—';
+            return <div className="session-row" key={session.id}><div className={`session-row__icon session-row__icon--${session.mode}`}><SessionIcon size={17} /></div><div><strong>{modeNames[session.mode]}</strong><span>{studySet?.title ?? 'Mixed review'} · {formatRelativeDate(session.finishedAt)}</span></div><em>{result}</em></div>;
           })}
           {!sessions.length && <div className="empty-inline"><CalendarDays /><p>Complete a study session to see it here.</p></div>}
         </section>
