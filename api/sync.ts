@@ -58,7 +58,7 @@ function response(request: Request, body: object | null, status = 200): Response
 }
 
 function authorized(request: Request): boolean {
-  const expected = process.env.RECALL_SYNC_KEY_SHA256;
+  const expected = process.env.RECALL_SYNC_KEY_SHA256?.trim();
   const bearer = request.headers.get('authorization');
   if (!expected || !/^[a-f0-9]{64}$/.test(expected) || !bearer?.startsWith('Bearer ')) return false;
   const key = bearer.slice(7);

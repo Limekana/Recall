@@ -52,6 +52,13 @@ afterEach(() => {
 });
 
 describe('private sync function', () => {
+  it('accepts a verifier with a trailing newline from provisioning', async () => {
+    process.env.RECALL_SYNC_KEY_SHA256 += '\r\n';
+    const accepted = await handler.fetch(request('GET'));
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toEqual({ snapshot: null });
+  });
+
   it('accepts Android CORS preflight but rejects a wrong key', async () => {
     const preflight = await handler.fetch(request('OPTIONS'));
     expect(preflight.status).toBe(204);
