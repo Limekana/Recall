@@ -1,7 +1,35 @@
 import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { hashSnapshot, isRecallSnapshot, type RemoteSnapshot } from '../src/sync/syncEngine';
 import type { RecallSnapshot } from '../src/types';
+
+interface RemoteSnapshot {
+  revision: number;
+  payload: RecallSnapshot;
+  payloadHash: string;
+  deviceId: string;
+  updatedAt: string;
+}
+
+function isRecallSnapshot(value: unknown): value is RecallSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Partial<RecallSnapshot>;
+  return snapshot.version === 1
+    && Array.isArray(snapshot.sets)
+    && Array.isArray(snapshot.cards)
+    && Array.isArray(snapshot.progress)
+    && Array.isArray(snapshot.sessions);
+}
+
+function hashSnapshot(snapshot: RecallSnapshot): string {
+  const ordered: RecallSnapshot = {
+    version: 1,
+    sets: [...snapshot.sets].sort((a, b) => a.id.localeCompare(b.id)),
+    cards: [...snapshot.cards].sort((a, b) => a.id.localeCompare(b.id)),
+    progress: [...snapshot.progress].sort((a, b) => a.cardId.localeCompare(b.cardId)),
+    sessions: [...snapshot.sessions].sort((a, b) => a.id.localeCompare(b.id))
+  };
+  return createHash('sha256').update(JSON.stringify(ordered)).digest('hex');
+}
 
 const BLOB_PATH = 'recall/private/snapshot.json';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
