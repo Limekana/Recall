@@ -1061,7 +1061,7 @@ textarea::placeholder {
 
 .sync-promise li small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.55;
 }
 
@@ -1080,31 +1080,8 @@ textarea::placeholder {
   font-size: 36px;
 }
 
-.sync-auth-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 13px;
-  background: #0e110f;
-}
-
-.sync-auth-tabs button {
-  min-height: 39px;
-  border: 0;
-  border-radius: 9px;
-  cursor: pointer;
-  color: var(--muted);
-  background: transparent;
-  font-size: 9px;
-  font-weight: 650;
-}
-
-.sync-auth-tabs button.is-active {
-  color: var(--paper);
-  background: var(--surface-raised);
-  box-shadow: 0 7px 18px rgba(0, 0, 0, .2);
-}
+.sync-key-badge { display: inline-flex; width: fit-content; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid rgba(234, 255, 98, .2); border-radius: 99px; color: var(--signal); background: var(--signal-soft); font-size: 10px; font-weight: 650; letter-spacing: .04em; }
+.sync-auth-card__intro { max-width: 34ch; margin: -4px 0 2px; color: var(--muted); font-size: 12px; line-height: 1.6; }
 
 .sync-auth-card > label {
   display: grid;
@@ -1113,7 +1090,7 @@ textarea::placeholder {
 
 .sync-auth-card > label > span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 650;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -1131,7 +1108,7 @@ textarea::placeholder {
 }
 
 .sync-auth-card input:focus { border-color: rgba(234, 255, 98, .5); }
-.sync-fine-print { margin: 0; color: #757d75; font-size: 8px; line-height: 1.65; }
+.sync-fine-print { margin: 0; color: #8e978d; font-size: 10px; line-height: 1.65; }
 
 .sync-status-card {
   display: grid;
@@ -1157,7 +1134,7 @@ textarea::placeholder {
 
 .sync-status-card__signal--conflict { color: var(--ink); background: var(--amber); }
 .sync-status-card__copy h2 { margin: 0 0 4px; font-size: 29px; }
-.sync-status-card__copy > p:last-child { margin: 0; color: var(--muted); font-size: 9px; }
+.sync-status-card__copy > p:last-child { margin: 0; color: var(--muted); font-size: 11px; }
 
 .sync-conflict {
   margin-top: 24px;
@@ -1247,7 +1224,8 @@ textarea::placeholder {
 
 .switch.is-on { border-color: rgba(234, 255, 98, .34); background: var(--signal-soft); }
 .switch.is-on span { background: var(--signal); transform: translateX(18px); }
-.sync-signout { display: inline-flex; align-items: center; gap: 8px; margin-top: 24px; padding: 8px 0; border: 0; cursor: pointer; color: var(--muted); background: transparent; font-size: 9px; }
+.sync-key-actions { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 24px; }
+.sync-signout { display: inline-flex; align-items: center; gap: 8px; padding: 8px 0; border: 0; cursor: pointer; color: var(--muted); background: transparent; font-size: 11px; }
 .sync-signout:hover { color: var(--paper); }
 
 .sync-message {
@@ -2018,7 +1996,7 @@ textarea::placeholder {
   .sync-promise__mark { width: 58px; height: 58px; margin-bottom: 43px; }
   .sync-promise h2 { font-size: 39px; }
   .sync-promise li { align-items: flex-start; }
-  .sync-auth-card { padding: 25px 20px; }
+  .sync-auth-card { order: -1; padding: 25px 20px; }
   .sync-status-card { grid-template-columns: auto 1fr; padding: 23px 20px; }
   .sync-status-card > .button { grid-column: 1 / -1; width: 100%; }
   .sync-status-card__signal { width: 52px; height: 52px; }

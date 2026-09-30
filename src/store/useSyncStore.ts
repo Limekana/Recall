@@ -1,8 +1,7 @@
-import type { Session } from '@supabase/supabase-js';
 import { create } from 'zustand';
 import { recallRepository } from '../db/repository';
-import { decideSync, hashSnapshot, isRecallSnapshot, snapshotHasData, type RemoteSnapshot } from '../sync/syncEngine';
-import { supabase, syncConfigured } from '../sync/supabase';
+import { clearSyncKey, fetchRemote, pushSnapshot, savedSyncKey, saveSyncKey } from '../sync/privateSync';
+import { decideSync, hashSnapshot, snapshotHasData, type RemoteSnapshot } from '../sync/syncEngine';
 import type { RecallSnapshot, SyncMetadata } from '../types';
 import { useRecallStore } from './useRecallStore';
 
@@ -15,8 +14,7 @@ interface SyncConflict {
 }
 
 interface SyncState {
-  configured: boolean;
-  session: Session | null;
+  connected: boolean;
   authReady: boolean;
   status: SyncStatus;
   autoSync: boolean;
@@ -25,9 +23,9 @@ interface SyncState {
   notice: string | null;
   error: string | null;
   initialize: () => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  connect: (key: string) => Promise<void>;
+  disconnect: () => void;
+  copyKey: () => Promise<void>;
   syncNow: () => Promise<void>;
   resolveConflict: (choice: 'device' | 'cloud') => Promise<void>;
   dismissConflict: () => void;
@@ -35,28 +33,26 @@ interface SyncState {
   clearMessage: () => void;
 }
 
-interface SyncRow {
-  user_id: string;
-  revision: number;
-  payload: unknown;
-  payload_hash: string;
-  device_id: string;
-  updated_at: string;
-}
-
 let initialized = false;
 let activeSync: Promise<void> | null = null;
+let activeKey: string | null = null;
 
 function deviceLabel(): string {
   const platform = navigator.userAgent.includes('Android') ? 'Android phone' : navigator.platform || 'Web device';
   return `${platform} · ${navigator.userAgent.includes('wv') ? 'Recall app' : 'Web'}`;
 }
 
+async function keyIdentity(key: string): Promise<string> {
+  const bytes = new TextEncoder().encode(key);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function ensureMetadata(userId?: string): Promise<SyncMetadata> {
   const existing = await recallRepository.loadSyncMetadata();
   if (existing) {
     if (!userId || existing.userId === userId) return existing;
-    const reset = {
+    const reset: SyncMetadata = {
       ...existing,
       userId,
       lastSyncedRevision: 0,
@@ -80,46 +76,6 @@ async function ensureMetadata(userId?: string): Promise<SyncMetadata> {
   return metadata;
 }
 
-function mapRemote(row: SyncRow): RemoteSnapshot {
-  if (!isRecallSnapshot(row.payload)) throw new Error('The cloud copy uses an unsupported Recall data format.');
-  return {
-    revision: row.revision,
-    payload: row.payload,
-    payloadHash: row.payload_hash,
-    deviceId: row.device_id,
-    updatedAt: row.updated_at
-  };
-}
-
-async function fetchRemote(): Promise<RemoteSnapshot | null> {
-  if (!supabase) return null;
-  const { data, error } = await supabase
-    .from('recall_sync_state')
-    .select('user_id, revision, payload, payload_hash, device_id, updated_at')
-    .maybeSingle<SyncRow>();
-  if (error) throw error;
-  return data ? mapRemote(data) : null;
-}
-
-async function pushSnapshot(
-  snapshot: RecallSnapshot,
-  payloadHash: string,
-  metadata: SyncMetadata,
-  expectedRevision: number
-): Promise<RemoteSnapshot> {
-  if (!supabase) throw new Error('Cloud sync is not configured in this build.');
-  const { data, error } = await supabase
-    .rpc('sync_recall_snapshot', {
-      expected_revision: expectedRevision,
-      next_payload: snapshot,
-      next_hash: payloadHash,
-      next_device_id: metadata.deviceId
-    })
-    .single<SyncRow>();
-  if (error) throw error;
-  return mapRemote(data);
-}
-
 async function saveSyncedMetadata(metadata: SyncMetadata, remote: RemoteSnapshot): Promise<SyncMetadata> {
   const next: SyncMetadata = {
     ...metadata,
@@ -132,20 +88,11 @@ async function saveSyncedMetadata(metadata: SyncMetadata, remote: RemoteSnapshot
 }
 
 function messageFrom(error: unknown): string {
-  const message = error instanceof Error
-    ? error.message
-    : typeof error === 'object' && error && 'message' in error && typeof error.message === 'string'
-      ? error.message
-      : 'Sync could not finish. Your local library is safe.';
-  if (/relation .*recall_sync_state.* does not exist|function .*sync_recall_snapshot/i.test(message)) {
-    return 'The Recall sync database is not ready yet. Your local library is unchanged.';
-  }
-  return message;
+  return error instanceof Error ? error.message : 'Sync could not finish. Your local library is safe.';
 }
 
 export const useSyncStore = create<SyncState>((set, get) => ({
-  configured: syncConfigured,
-  session: null,
+  connected: false,
   authReady: false,
   status: 'idle',
   autoSync: true,
@@ -158,73 +105,65 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     if (initialized) return;
     initialized = true;
     const metadata = await ensureMetadata();
-    set({ autoSync: metadata.autoSync, lastSyncedAt: metadata.lastSyncedAt });
-
-    if (!supabase) {
-      set({ authReady: true });
-      return;
-    }
-
-    const { data, error } = await supabase.auth.getSession();
-    if (error) {
-      set({ authReady: true, error: error.message });
-      return;
-    }
-    set({ authReady: true, session: data.session });
-
-    supabase.auth.onAuthStateChange((_event, session) => {
-      set({ session, error: null, notice: null, status: session ? 'idle' : 'idle' });
-      if (session) window.setTimeout(() => void get().syncNow(), 0);
-    });
-
-    if (data.session) void get().syncNow();
-  },
-
-  signIn: async (email, password) => {
-    if (!supabase) return;
-    set({ error: null, notice: null });
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    if (error) set({ error: error.message });
-  },
-
-  signUp: async (email, password) => {
-    if (!supabase) return;
-    set({ error: null, notice: null });
-    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
-    if (error) {
-      set({ error: error.message });
-      return;
-    }
+    activeKey = savedSyncKey();
     set({
-      session: data.session,
-      notice: data.session ? 'Account created. Sync is ready.' : 'Account created. Confirm the email, then sign in here.'
+      authReady: true,
+      connected: Boolean(activeKey),
+      autoSync: metadata.autoSync,
+      lastSyncedAt: metadata.lastSyncedAt
     });
+    if (activeKey && metadata.autoSync) void get().syncNow();
   },
 
-  signOut: async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      set({ error: error.message });
+  connect: async (key) => {
+    const candidate = key.trim();
+    if (candidate.length < 32) {
+      set({ error: 'Enter the full private sync key.', notice: null });
       return;
     }
-    set({ session: null, status: 'idle', conflict: null, notice: 'Signed out. Local study data remains on this device.' });
+    set({ error: null, notice: null, status: 'syncing' });
+    try {
+      await fetchRemote(candidate);
+      await ensureMetadata(await keyIdentity(candidate));
+      saveSyncKey(candidate);
+      activeKey = candidate;
+      set({ connected: true, status: 'idle', lastSyncedAt: null });
+      await get().syncNow();
+    } catch (error) {
+      set({ status: 'error', error: messageFrom(error) });
+    }
+  },
+
+  disconnect: () => {
+    clearSyncKey();
+    activeKey = null;
+    set({ connected: false, status: 'idle', conflict: null, notice: 'Private sync disconnected. Local study data remains here.', error: null });
+  },
+
+  copyKey: async () => {
+    if (!activeKey) return;
+    try {
+      await navigator.clipboard.writeText(activeKey);
+      set({ notice: 'Sync key copied. Keep it private.', error: null });
+    } catch {
+      set({ error: 'Could not copy the key. Check clipboard permissions.', notice: null });
+    }
   },
 
   syncNow: async () => {
     if (activeSync) return activeSync;
+    const key = activeKey;
+    if (!key) return;
     const run = async () => {
-      if (!get().session || !supabase) return;
       set({ status: 'syncing', error: null, notice: null });
       try {
         const [local, metadata, remote] = await Promise.all([
           recallRepository.exportSnapshot(),
-          ensureMetadata(get().session!.user.id),
-          fetchRemote()
+          ensureMetadata(await keyIdentity(key)),
+          fetchRemote(key)
         ]);
         const localHash = await hashSnapshot(local);
         const decision = decideSync({ localHash, localHasData: snapshotHasData(local), metadata, remote });
-
         if (decision === 'conflict' && remote) {
           set({ status: 'conflict', conflict: { local, localHash, remote } });
           return;
@@ -233,9 +172,9 @@ export const useSyncStore = create<SyncState>((set, get) => ({
         let syncedRemote = remote;
         if (decision === 'push') {
           try {
-            syncedRemote = await pushSnapshot(local, localHash, metadata, remote?.revision ?? 0);
+            syncedRemote = await pushSnapshot(key, local, localHash, metadata.deviceId, remote?.revision ?? 0);
           } catch (error) {
-            const latest = await fetchRemote();
+            const latest = await fetchRemote(key);
             if (latest && latest.revision !== (remote?.revision ?? 0)) {
               set({ status: 'conflict', conflict: { local, localHash, remote: latest } });
               return;
@@ -243,15 +182,33 @@ export const useSyncStore = create<SyncState>((set, get) => ({
             throw error;
           }
         } else if (decision === 'pull' && remote) {
+          const currentLocal = await recallRepository.exportSnapshot();
+          const currentHash = await hashSnapshot(currentLocal);
+          if (currentHash !== localHash) {
+            set({ status: 'conflict', conflict: { local: currentLocal, localHash: currentHash, remote } });
+            return;
+          }
           await recallRepository.replaceSnapshot(remote.payload);
           await useRecallStore.getState().hydrate();
         }
 
-        if (!syncedRemote) throw new Error('Cloud sync did not return a snapshot.');
+        if (!syncedRemote) throw new Error('Private sync did not return a snapshot.');
         const nextMetadata = await saveSyncedMetadata(metadata, syncedRemote);
         set({ status: 'synced', conflict: null, lastSyncedAt: nextMetadata.lastSyncedAt, notice: 'Library synced.' });
+        if (get().autoSync && activeKey === key) {
+          const latestLocalHash = await hashSnapshot(await recallRepository.exportSnapshot());
+          if (latestLocalHash !== syncedRemote.payloadHash) {
+            window.setTimeout(() => void get().syncNow(), 0);
+          }
+        }
       } catch (error) {
-        set({ status: 'error', error: messageFrom(error) });
+        const message = messageFrom(error);
+        if (message.includes('sync key was not accepted')) {
+          clearSyncKey();
+          activeKey = null;
+          set({ connected: false });
+        }
+        set({ status: 'error', error: message });
       }
     };
     activeSync = run().finally(() => { activeSync = null; });
@@ -260,19 +217,35 @@ export const useSyncStore = create<SyncState>((set, get) => ({
 
   resolveConflict: async (choice) => {
     const conflict = get().conflict;
-    if (!conflict) return;
+    const key = activeKey;
+    if (!conflict || !key) return;
     set({ status: 'syncing', error: null, notice: null });
     try {
-      const metadata = await ensureMetadata(get().session?.user.id);
-      let selectedRemote = conflict.remote;
+      const metadata = await ensureMetadata(await keyIdentity(key));
+      const currentLocal = await recallRepository.exportSnapshot();
+      const currentHash = await hashSnapshot(currentLocal);
+      const latest = await fetchRemote(key);
+      if (!latest) throw new Error('The cloud copy is missing. Sync again before choosing.');
+      if (currentHash !== conflict.localHash || latest.revision !== conflict.remote.revision) {
+        set({
+          status: 'conflict',
+          conflict: { local: currentLocal, localHash: currentHash, remote: latest },
+          notice: 'A copy changed while you were deciding. Review the current versions again.'
+        });
+        return;
+      }
+      let selectedRemote = latest;
       if (choice === 'device') {
-        selectedRemote = await pushSnapshot(conflict.local, conflict.localHash, metadata, conflict.remote.revision);
+        selectedRemote = await pushSnapshot(key, currentLocal, currentHash, metadata.deviceId, latest.revision);
       } else {
-        await recallRepository.replaceSnapshot(conflict.remote.payload);
+        await recallRepository.replaceSnapshot(latest.payload);
         await useRecallStore.getState().hydrate();
       }
       const nextMetadata = await saveSyncedMetadata(metadata, selectedRemote);
-      set({ status: 'synced', conflict: null, lastSyncedAt: nextMetadata.lastSyncedAt, notice: choice === 'device' ? 'This device is now the cloud copy.' : 'This device now matches the cloud copy.' });
+      set({
+        status: 'synced', conflict: null, lastSyncedAt: nextMetadata.lastSyncedAt,
+        notice: choice === 'device' ? 'This device is now the cloud copy.' : 'This device now matches the cloud copy.'
+      });
     } catch (error) {
       set({ status: 'error', error: messageFrom(error) });
     }

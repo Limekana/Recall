@@ -21,7 +21,7 @@ export default function App() {
   const error = useRecallStore((state) => state.error);
   const hydrate = useRecallStore((state) => state.hydrate);
   const initializeSync = useSyncStore((state) => state.initialize);
-  const session = useSyncStore((state) => state.session);
+  const connected = useSyncStore((state) => state.connected);
   const autoSync = useSyncStore((state) => state.autoSync);
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function App() {
   }, [initializeSync, ready]);
 
   useEffect(() => {
-    if (!ready || !session || !autoSync) return;
+    if (!ready || !connected || !autoSync) return;
     let timer: number | undefined;
     const requestSync = () => {
       window.clearTimeout(timer);
@@ -51,7 +51,7 @@ export default function App() {
       window.removeEventListener('online', requestSync);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [autoSync, ready, session]);
+  }, [autoSync, connected, ready]);
 
   if (!ready) {
     return (
