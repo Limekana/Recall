@@ -1,59 +1,67 @@
 import { describe, expect, it } from 'vitest';
-import { decideSync, type RemoteSnapshot } from './syncEngine';
-import type { SyncMetadata } from '../types';
+import { hashSnapshot, mergeSnapshots } from './syncEngine';
+import type { Card, CardProgress, RecallSnapshot, StudySession, StudySet } from '../types';
 
-const metadata: SyncMetadata = {
-  id: 'primary',
-  userId: null,
-  deviceId: 'phone',
-  deviceLabel: 'Phone',
-  lastSyncedRevision: 3,
-  lastSyncedHash: 'shared',
-  lastSyncedAt: 1,
-  autoSync: true
-};
+const set = (id: string, updatedAt = 1, title = id): StudySet => ({ id, title, subject: '', tags: [], archived: false, createdAt: 1, updatedAt });
+const card = (id: string, setId: string, updatedAt = 1, term = id): Card => ({ id, setId, term, definition: `${id} def`, starred: false, createdAt: 1, updatedAt });
+const progress = (cardId: string, lastSeen: number, timesSeen = 1): CardProgress => ({ cardId, mastery: 10 * timesSeen, timesSeen, correctCount: timesSeen, incorrectCount: 0, streak: 1, lastSeen, nextReview: 0 });
+const session = (id: string, setId: string): StudySession => ({ id, setId, mode: 'learn', startedAt: 0, finishedAt: 1, score: 1, total: 1, weakCardIds: [] });
+const snap = (parts: Partial<RecallSnapshot>): RecallSnapshot => ({ version: 1, sets: [], cards: [], progress: [], sessions: [], ...parts });
 
-const remote: RemoteSnapshot = {
-  revision: 3,
-  payload: { version: 1, sets: [], cards: [], progress: [], sessions: [] },
-  payloadHash: 'shared',
-  deviceId: 'desktop',
-  updatedAt: '2026-09-17T00:00:00Z'
-};
-
-describe('decideSync', () => {
-  it('pushes when the account has no cloud snapshot yet', () => {
-    expect(decideSync({ localHash: 'local', localHasData: true, metadata, remote: null })).toBe('push');
+describe('mergeSnapshots', () => {
+  it('combines cards added on each device', () => {
+    const laptop = snap({ sets: [set('s')], cards: [card('a', 's'), card('laptop', 's', 5)] });
+    const phone = snap({ sets: [set('s')], cards: [card('a', 's'), card('phone', 's', 6)] });
+    expect(mergeSnapshots(phone, laptop).cards.map((item) => item.id).sort()).toEqual(['a', 'laptop', 'phone']);
   });
 
-  it('pulls a cloud library onto a fresh device', () => {
-    expect(decideSync({
-      localHash: 'empty',
-      localHasData: false,
-      metadata: { ...metadata, lastSyncedRevision: 0, lastSyncedHash: '' },
-      remote: { ...remote, revision: 4, payloadHash: 'cloud' }
-    })).toBe('pull');
+  it('keeps the newest edit of the same card', () => {
+    const merged = mergeSnapshots(
+      snap({ sets: [set('s')], cards: [card('a', 's', 2, 'old')] }),
+      snap({ sets: [set('s')], cards: [card('a', 's', 9, 'new')] })
+    );
+    expect(merged.cards[0].term).toBe('new');
   });
 
-  it('pushes when only this device changed', () => {
-    expect(decideSync({ localHash: 'local-change', localHasData: true, metadata, remote })).toBe('push');
+  it('keeps the most recently studied progress and unions sessions', () => {
+    const merged = mergeSnapshots(
+      snap({ sets: [set('s')], cards: [card('a', 's')], progress: [progress('a', 100, 3)], sessions: [session('x', 's')] }),
+      snap({ sets: [set('s')], cards: [card('a', 's')], progress: [progress('a', 200, 1)], sessions: [session('y', 's'), session('r', 'mixed-review')] })
+    );
+    expect(merged.progress[0].lastSeen).toBe(200);
+    expect(merged.sessions.map((item) => item.id).sort()).toEqual(['r', 'x', 'y']);
   });
 
-  it('pulls when only the cloud changed', () => {
-    expect(decideSync({
-      localHash: 'shared',
-      localHasData: true,
-      metadata,
-      remote: { ...remote, revision: 4, payloadHash: 'cloud-change' }
-    })).toBe('pull');
+  it('propagates deletions instead of resurrecting them', () => {
+    const merged = mergeSnapshots(
+      snap({ sets: [set('s'), set('gone')], cards: [card('a', 's'), card('b', 'gone')], progress: [progress('a', 1), progress('b', 1)], sessions: [session('x', 'gone')] }),
+      snap({ sets: [set('s')], cards: [], deleted: [{ id: 'gone', kind: 'set', deletedAt: 50 }, { id: 'b', kind: 'card', deletedAt: 50 }, { id: 'a', kind: 'card', deletedAt: 50 }] })
+    );
+    expect(merged.sets.map((item) => item.id)).toEqual(['s']);
+    expect(merged.cards).toEqual([]);
+    expect(merged.progress).toEqual([]);
+    expect(merged.sessions).toEqual([]);
+    expect(merged.deleted).toHaveLength(3);
   });
 
-  it('stops for an explicit conflict when both sides changed', () => {
-    expect(decideSync({
-      localHash: 'local-change',
-      localHasData: true,
-      metadata,
-      remote: { ...remote, revision: 4, payloadHash: 'cloud-change' }
-    })).toBe('conflict');
+  it('keeps an item edited again after another device deleted it', () => {
+    const merged = mergeSnapshots(
+      snap({ sets: [set('s')], cards: [card('a', 's', 99)] }),
+      snap({ sets: [set('s')], deleted: [{ id: 'a', kind: 'card', deletedAt: 50 }] })
+    );
+    expect(merged.cards.map((item) => item.id)).toEqual(['a']);
+  });
+
+  it('is order-independent and idempotent', async () => {
+    const a = snap({ sets: [set('s', 3)], cards: [card('a', 's', 4)], progress: [progress('a', 10)] });
+    const b = snap({ sets: [set('s', 5), set('t')], cards: [card('b', 't')], sessions: [session('x', 't')] });
+    const ab = mergeSnapshots(a, b);
+    expect(await hashSnapshot(ab)).toBe(await hashSnapshot(mergeSnapshots(b, a)));
+    expect(await hashSnapshot(mergeSnapshots(ab, b))).toBe(await hashSnapshot(ab));
+  });
+
+  it('hashes old-format snapshots the same with or without an empty deleted list', async () => {
+    const base = snap({ sets: [set('s')] });
+    expect(await hashSnapshot(base)).toBe(await hashSnapshot({ ...base, deleted: [] }));
   });
 });

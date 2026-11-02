@@ -19,6 +19,9 @@ export function clearSyncKey(): void {
   localStorage.removeItem(KEY_STORAGE);
 }
 
+/** The cloud copy moved on since it was read; the caller should re-read and merge again. */
+export class SyncRevisionConflict extends Error {}
+
 async function requestSync(key: string, method: 'GET' | 'PUT', body?: object): Promise<unknown> {
   let response: Response;
   try {
@@ -37,7 +40,8 @@ async function requestSync(key: string, method: 'GET' | 'PUT', body?: object): P
   const result = await response.json().catch(() => null) as { error?: string } | null;
   if (!response.ok) {
     if (response.status === 401) throw new Error('That sync key was not accepted. Check it and try again.');
-    if (response.status === 409) throw new Error('The cloud copy changed on another device. Sync again to review it.');
+    if (response.status === 409) throw new SyncRevisionConflict('The cloud copy changed on another device while syncing.');
+    if (response.status === 413) throw new Error('Your library is too large for private sync.');
     throw new Error(result?.error ?? `Private sync is unavailable (${response.status}).`);
   }
   return result;

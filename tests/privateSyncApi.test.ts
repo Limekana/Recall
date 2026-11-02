@@ -99,3 +99,14 @@ describe('private sync function', () => {
     expect(stored).toBeNull();
   });
 });
+
+describe('private sync function with deletions', () => {
+  it('accepts snapshots carrying tombstones and hashes them like the client', async () => {
+    const payload: RecallSnapshot = { ...empty, deleted: [{ id: 'card_x', kind: 'card', deletedAt: 5 }] };
+    const response = await handler.fetch(request('PUT', {
+      payload, payloadHash: await hashSnapshot(payload), deviceId: 'phone', expectedRevision: 0
+    }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).snapshot.payload.deleted).toHaveLength(1);
+  });
+});

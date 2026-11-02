@@ -2091,3 +2091,8 @@ textarea::placeholder {
   .blast-ghost .blast-shape i { border-radius: 5px; }
 }
 .modal-card__actions { flex-wrap: wrap; }
+
+/* Sync problem indicator on the Sync nav item */
+.nav-link, .bottom-nav__link { position: relative; }
+.nav-alert { position: absolute; top: 6px; left: 26px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--ink, #0d0f0d); }
+.bottom-nav__link .nav-alert { top: 4px; left: calc(50% + 6px); }

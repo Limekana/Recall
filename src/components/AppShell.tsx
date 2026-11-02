@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react';
 import { BarChart3, Cloud, Home, Layers3, RefreshCw } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { RecallMark } from './RecallMark';
+import { useSyncStore } from '../store/useSyncStore';
 
 const navigation = [
   { to: '/', label: 'Today', icon: Home, end: true },
@@ -14,6 +15,7 @@ const navigation = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const focusMode = /\/(study|test|match|blast)\//.test(pathname);
+  const syncBroken = useSyncStore((state) => state.status === 'error');
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -31,6 +33,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink key={to} to={to} end={end} className={({ isActive }) => `nav-link${isActive ? ' is-active' : ''}`}>
               <Icon size={19} strokeWidth={1.8} />
               <span>{label}</span>
+              {to === '/sync' && syncBroken && <i className="nav-alert" aria-label="Sync problem" />}
             </NavLink>
           ))}
         </nav>
@@ -44,6 +47,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <NavLink key={to} to={to} end={end} className={({ isActive }) => `bottom-nav__link${isActive ? ' is-active' : ''}`}>
             <Icon size={21} strokeWidth={1.8} />
             <span>{label}</span>
+            {to === '/sync' && syncBroken && <i className="nav-alert" aria-label="Sync problem" />}
           </NavLink>
         ))}
       </nav>

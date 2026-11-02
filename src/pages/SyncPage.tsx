@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Cloud, Copy, KeyRound, LogOut, RefreshCw, ShieldCheck, Smartphone } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Check, Cloud, Copy, GitMerge, KeyRound, LogOut, RefreshCw, ShieldCheck, Smartphone } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { useRecallStore } from '../store/useRecallStore';
 import { useSyncStore } from '../store/useSyncStore';
@@ -14,29 +14,20 @@ export function SyncPage() {
   const [submitting, setSubmitting] = useState(false);
   const sets = useRecallStore((state) => state.sets);
   const cards = useRecallStore((state) => state.cards);
-  const sessions = useRecallStore((state) => state.sessions);
   const authReady = useSyncStore((state) => state.authReady);
   const connected = useSyncStore((state) => state.connected);
   const status = useSyncStore((state) => state.status);
   const autoSync = useSyncStore((state) => state.autoSync);
   const lastSyncedAt = useSyncStore((state) => state.lastSyncedAt);
-  const conflict = useSyncStore((state) => state.conflict);
   const notice = useSyncStore((state) => state.notice);
   const error = useSyncStore((state) => state.error);
   const connect = useSyncStore((state) => state.connect);
   const disconnect = useSyncStore((state) => state.disconnect);
   const copyKey = useSyncStore((state) => state.copyKey);
   const syncNow = useSyncStore((state) => state.syncNow);
-  const resolveConflict = useSyncStore((state) => state.resolveConflict);
-  const dismissConflict = useSyncStore((state) => state.dismissConflict);
   const setAutoSync = useSyncStore((state) => state.setAutoSync);
 
-  const localStats = useMemo(() => ({ sets: sets.length, cards: cards.length, sessions: sessions.length }), [sets, cards, sessions]);
-  const cloudStats = conflict ? {
-    sets: conflict.remote.payload.sets.length,
-    cards: conflict.remote.payload.cards.length,
-    sessions: conflict.remote.payload.sessions.length
-  } : null;
+  const localStats = { sets: sets.length, cards: cards.length };
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -66,7 +57,7 @@ export function SyncPage() {
             <ul>
               <li><ShieldCheck /><span><strong>Private by design</strong><small>Only devices with your personal key can open the cloud copy.</small></span></li>
               <li><Cloud /><span><strong>Local first</strong><small>Study, edit, and review without a connection.</small></span></li>
-              <li><RefreshCw /><span><strong>You choose in a conflict</strong><small>Recall never silently picks one device over another.</small></span></li>
+              <li><GitMerge /><span><strong>Changes merge automatically</strong><small>Study on both devices; new cards, edits, deletions and progress combine on the next sync.</small></span></li>
             </ul>
           </section>
 
@@ -83,26 +74,15 @@ export function SyncPage() {
         <>
           <section className="sync-status-card">
             <div className={`sync-status-card__signal sync-status-card__signal--${status}`}>
-              {status === 'syncing' ? <RefreshCw className="is-spinning" /> : status === 'conflict' ? <AlertTriangle /> : <Cloud />}
+              {status === 'syncing' ? <RefreshCw className="is-spinning" /> : status === 'error' ? <AlertTriangle /> : <Cloud />}
             </div>
             <div className="sync-status-card__copy">
-              <p className="eyebrow">{status === 'conflict' ? 'Choice required' : status === 'syncing' ? 'Syncing now' : 'Private sync connected'}</p>
+              <p className="eyebrow">{status === 'error' ? 'Sync needs attention' : status === 'syncing' ? 'Syncing now' : 'Private sync connected'}</p>
               <h2>Your Recall library</h2>
-              <p>{status === 'conflict' ? 'Both copies changed. Nothing will be overwritten until you choose.' : `Last sync: ${formatSyncTime(lastSyncedAt)}`}</p>
+              <p>Last sync: {formatSyncTime(lastSyncedAt)}</p>
             </div>
-            <button className="button button--accent" disabled={status === 'syncing' || status === 'conflict'} onClick={() => void syncNow()}><RefreshCw size={17} /> Sync now</button>
+            <button className="button button--accent" disabled={status === 'syncing'} onClick={() => void syncNow()}><RefreshCw size={17} /> Sync now</button>
           </section>
-
-          {conflict && cloudStats && (
-            <section className="sync-conflict" aria-live="polite">
-              <div className="sync-conflict__heading"><AlertTriangle /><div><p className="eyebrow">Sync paused safely</p><h2>Which library should win?</h2><p>Review the counts below. The other copy will be replaced only after you choose.</p></div></div>
-              <div className="sync-conflict__choices">
-                <article><Smartphone /><span><small>This device</small><strong>{localStats.sets} sets · {localStats.cards} cards</strong><em>{localStats.sessions} study sessions</em></span><button className="button button--primary" onClick={() => void resolveConflict('device')}>Keep this device</button></article>
-                <article><Cloud /><span><small>Cloud copy</small><strong>{cloudStats.sets} sets · {cloudStats.cards} cards</strong><em>{cloudStats.sessions} study sessions</em></span><button className="button button--secondary" onClick={() => void resolveConflict('cloud')}>Use cloud copy</button></article>
-              </div>
-              <button className="text-link" onClick={dismissConflict}>Decide later — keep both unchanged</button>
-            </section>
-          )}
 
           <section className="sync-device-grid">
             <article><div><Smartphone /><span><small>On this device</small><strong>{localStats.sets} sets · {localStats.cards} cards</strong></span></div><Check /></article>

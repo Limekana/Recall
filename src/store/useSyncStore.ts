@@ -1,17 +1,14 @@
 import { create } from 'zustand';
 import { recallRepository } from '../db/repository';
-import { clearSyncKey, fetchRemote, pushSnapshot, savedSyncKey, saveSyncKey } from '../sync/privateSync';
-import { decideSync, hashSnapshot, snapshotHasData, type RemoteSnapshot } from '../sync/syncEngine';
-import type { RecallSnapshot, SyncMetadata } from '../types';
+import { clearSyncKey, fetchRemote, pushSnapshot, savedSyncKey, saveSyncKey, SyncRevisionConflict } from '../sync/privateSync';
+import { hashSnapshot, mergeSnapshots, snapshotFingerprint, type RemoteSnapshot } from '../sync/syncEngine';
+import type { SyncMetadata } from '../types';
 import { useRecallStore } from './useRecallStore';
 
-type SyncStatus = 'idle' | 'syncing' | 'synced' | 'conflict' | 'error';
+type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
 
-interface SyncConflict {
-  local: RecallSnapshot;
-  localHash: string;
-  remote: RemoteSnapshot;
-}
+/** How many times to re-read and re-merge when another device writes mid-sync. */
+const MAX_SYNC_ATTEMPTS = 4;
 
 interface SyncState {
   connected: boolean;
@@ -19,7 +16,6 @@ interface SyncState {
   status: SyncStatus;
   autoSync: boolean;
   lastSyncedAt: number | null;
-  conflict: SyncConflict | null;
   notice: string | null;
   error: string | null;
   initialize: () => Promise<void>;
@@ -27,8 +23,6 @@ interface SyncState {
   disconnect: () => void;
   copyKey: () => Promise<void>;
   syncNow: () => Promise<void>;
-  resolveConflict: (choice: 'device' | 'cloud') => Promise<void>;
-  dismissConflict: () => void;
   setAutoSync: (enabled: boolean) => Promise<void>;
   clearMessage: () => void;
 }
@@ -97,7 +91,6 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   status: 'idle',
   autoSync: true,
   lastSyncedAt: null,
-  conflict: null,
   notice: null,
   error: null,
 
@@ -137,7 +130,7 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   disconnect: () => {
     clearSyncKey();
     activeKey = null;
-    set({ connected: false, status: 'idle', conflict: null, notice: 'Private sync disconnected. Local study data remains here.', error: null });
+    set({ connected: false, status: 'idle', notice: 'Private sync disconnected. Local study data remains here.', error: null });
   },
 
   copyKey: async () => {
@@ -151,56 +144,51 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   },
 
   syncNow: async () => {
-    if (activeSync) return activeSync;
+    if (activeSync) {
+      // Changes made during a sync are picked up by the follow-up check at the end of it.
+      return activeSync;
+    }
     const key = activeKey;
     if (!key) return;
     const run = async () => {
       set({ status: 'syncing', error: null, notice: null });
       try {
-        const [local, metadata, remote] = await Promise.all([
-          recallRepository.exportSnapshot(),
-          ensureMetadata(await keyIdentity(key)),
-          fetchRemote(key)
-        ]);
-        const localHash = await hashSnapshot(local);
-        const decision = decideSync({ localHash, localHasData: snapshotHasData(local), metadata, remote });
-        if (decision === 'conflict' && remote) {
-          set({ status: 'conflict', conflict: { local, localHash, remote } });
+        const metadata = await ensureMetadata(await keyIdentity(key));
+        for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt += 1) {
+          const [local, remote] = await Promise.all([recallRepository.exportSnapshot(), fetchRemote(key)]);
+          const localFingerprint = snapshotFingerprint(local);
+          const localHash = await hashSnapshot(local);
+
+          // Merge record-by-record instead of making one device's library win.
+          const merged = remote && remote.payloadHash !== localHash ? mergeSnapshots(local, remote.payload) : local;
+          const mergedHash = merged === local ? localHash : await hashSnapshot(merged);
+
+          if (mergedHash !== localHash) {
+            const applied = await recallRepository.replaceSnapshotIfUnchanged(localFingerprint, merged);
+            if (!applied) continue; // Studied while merging: start over with the newer local copy.
+            await useRecallStore.getState().hydrate();
+          }
+
+          let synced: RemoteSnapshot | null = remote;
+          if (!remote || remote.payloadHash !== mergedHash) {
+            try {
+              synced = await pushSnapshot(key, merged, mergedHash, metadata.deviceId, remote?.revision ?? 0);
+            } catch (error) {
+              if (error instanceof SyncRevisionConflict) continue; // Another device pushed first.
+              throw error;
+            }
+          }
+          if (!synced) throw new Error('Private sync did not return a snapshot.');
+
+          const nextMetadata = await saveSyncedMetadata(metadata, synced);
+          set({ status: 'synced', lastSyncedAt: nextMetadata.lastSyncedAt, notice: 'Library synced.' });
+          if (get().autoSync && activeKey === key) {
+            const latestLocalHash = await hashSnapshot(await recallRepository.exportSnapshot());
+            if (latestLocalHash !== synced.payloadHash) window.setTimeout(() => void get().syncNow(), 0);
+          }
           return;
         }
-
-        let syncedRemote = remote;
-        if (decision === 'push') {
-          try {
-            syncedRemote = await pushSnapshot(key, local, localHash, metadata.deviceId, remote?.revision ?? 0);
-          } catch (error) {
-            const latest = await fetchRemote(key);
-            if (latest && latest.revision !== (remote?.revision ?? 0)) {
-              set({ status: 'conflict', conflict: { local, localHash, remote: latest } });
-              return;
-            }
-            throw error;
-          }
-        } else if (decision === 'pull' && remote) {
-          const currentLocal = await recallRepository.exportSnapshot();
-          const currentHash = await hashSnapshot(currentLocal);
-          if (currentHash !== localHash) {
-            set({ status: 'conflict', conflict: { local: currentLocal, localHash: currentHash, remote } });
-            return;
-          }
-          await recallRepository.replaceSnapshot(remote.payload);
-          await useRecallStore.getState().hydrate();
-        }
-
-        if (!syncedRemote) throw new Error('Private sync did not return a snapshot.');
-        const nextMetadata = await saveSyncedMetadata(metadata, syncedRemote);
-        set({ status: 'synced', conflict: null, lastSyncedAt: nextMetadata.lastSyncedAt, notice: 'Library synced.' });
-        if (get().autoSync && activeKey === key) {
-          const latestLocalHash = await hashSnapshot(await recallRepository.exportSnapshot());
-          if (latestLocalHash !== syncedRemote.payloadHash) {
-            window.setTimeout(() => void get().syncNow(), 0);
-          }
-        }
+        throw new Error('Another device kept changing the library. Sync will retry shortly.');
       } catch (error) {
         const message = messageFrom(error);
         if (message.includes('sync key was not accepted')) {
@@ -214,44 +202,6 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     activeSync = run().finally(() => { activeSync = null; });
     return activeSync;
   },
-
-  resolveConflict: async (choice) => {
-    const conflict = get().conflict;
-    const key = activeKey;
-    if (!conflict || !key) return;
-    set({ status: 'syncing', error: null, notice: null });
-    try {
-      const metadata = await ensureMetadata(await keyIdentity(key));
-      const currentLocal = await recallRepository.exportSnapshot();
-      const currentHash = await hashSnapshot(currentLocal);
-      const latest = await fetchRemote(key);
-      if (!latest) throw new Error('The cloud copy is missing. Sync again before choosing.');
-      if (currentHash !== conflict.localHash || latest.revision !== conflict.remote.revision) {
-        set({
-          status: 'conflict',
-          conflict: { local: currentLocal, localHash: currentHash, remote: latest },
-          notice: 'A copy changed while you were deciding. Review the current versions again.'
-        });
-        return;
-      }
-      let selectedRemote = latest;
-      if (choice === 'device') {
-        selectedRemote = await pushSnapshot(key, currentLocal, currentHash, metadata.deviceId, latest.revision);
-      } else {
-        await recallRepository.replaceSnapshot(latest.payload);
-        await useRecallStore.getState().hydrate();
-      }
-      const nextMetadata = await saveSyncedMetadata(metadata, selectedRemote);
-      set({
-        status: 'synced', conflict: null, lastSyncedAt: nextMetadata.lastSyncedAt,
-        notice: choice === 'device' ? 'This device is now the cloud copy.' : 'This device now matches the cloud copy.'
-      });
-    } catch (error) {
-      set({ status: 'error', error: messageFrom(error) });
-    }
-  },
-
-  dismissConflict: () => set({ conflict: null, status: 'idle', notice: 'Conflict left unresolved. Nothing was overwritten.' }),
 
   setAutoSync: async (enabled) => {
     const metadata = await ensureMetadata();

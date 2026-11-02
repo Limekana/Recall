@@ -17,7 +17,8 @@ function isRecallSnapshot(value: unknown): value is RecallSnapshot {
     && Array.isArray(snapshot.sets)
     && Array.isArray(snapshot.cards)
     && Array.isArray(snapshot.progress)
-    && Array.isArray(snapshot.sessions);
+    && Array.isArray(snapshot.sessions)
+    && (snapshot.deleted === undefined || Array.isArray(snapshot.deleted));
 }
 
 function hashSnapshot(snapshot: RecallSnapshot): string {
@@ -28,11 +29,14 @@ function hashSnapshot(snapshot: RecallSnapshot): string {
     progress: [...snapshot.progress].sort((a, b) => a.cardId.localeCompare(b.cardId)),
     sessions: [...snapshot.sessions].sort((a, b) => a.id.localeCompare(b.id))
   };
+  // Must match src/sync/syncEngine.ts orderedSnapshot exactly.
+  if (snapshot.deleted?.length) ordered.deleted = [...snapshot.deleted].sort((a, b) => a.id.localeCompare(b.id));
   return createHash('sha256').update(JSON.stringify(ordered)).digest('hex');
 }
 
 const BLOB_PATH = 'recall/private/snapshot.json';
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+// Vercel Functions accept request bodies up to 4.5 MB.
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const ALLOWED_ORIGINS = new Set(['https://recall.limecore.dev', 'https://localhost', 'capacitor://localhost']);
 
 function originAllowed(origin: string | null): boolean {
@@ -73,7 +77,8 @@ function validSnapshot(snapshot: unknown): snapshot is RecallSnapshot {
     && snapshot.cards.every((card) => typeof card.id === 'string' && typeof card.setId === 'string'
       && typeof card.term === 'string' && typeof card.definition === 'string')
     && snapshot.progress.every((progress) => typeof progress.cardId === 'string')
-    && snapshot.sessions.every((session) => typeof session.id === 'string' && typeof session.setId === 'string');
+    && snapshot.sessions.every((session) => typeof session.id === 'string' && typeof session.setId === 'string')
+    && (snapshot.deleted ?? []).every((item) => typeof item.id === 'string' && typeof item.deletedAt === 'number');
 }
 
 async function readRemote(): Promise<{ snapshot: RemoteSnapshot; etag: string } | null> {
@@ -94,7 +99,10 @@ async function handle(request: Request): Promise<Response> {
   if (!process.env.RECALL_SYNC_KEY_SHA256 || (!process.env.BLOB_READ_WRITE_TOKEN && !process.env.BLOB_STORE_ID)) {
     return response(request, { error: 'Private sync is not configured yet.' }, 503);
   }
-  if (!authorized(request)) return response(request, { error: 'Invalid sync key.' }, 401);
+  if (!authorized(request)) {
+    console.warn('sync: rejected key', request.method);
+    return response(request, { error: 'Invalid sync key.' }, 401);
+  }
 
   try {
     if (request.method === 'GET') return response(request, { snapshot: (await readRemote())?.snapshot ?? null });
@@ -102,6 +110,7 @@ async function handle(request: Request): Promise<Response> {
       return response(request, { error: 'Expected JSON.' }, 415);
     }
     if (Number(request.headers.get('content-length')) > MAX_BODY_BYTES) {
+      console.warn('sync: payload too large', request.headers.get('content-length'));
       return response(request, { error: 'Library is too large to sync.' }, 413);
     }
     const raw = await request.text();
@@ -122,6 +131,7 @@ async function handle(request: Request): Promise<Response> {
     }
     const current = await readRemote();
     if ((current?.snapshot.revision ?? 0) !== expectedRevision) {
+      console.info('sync: stale revision', expectedRevision, 'current', current?.snapshot.revision ?? 0);
       return response(request, { error: 'The cloud copy changed on another device.' }, 409);
     }
     const snapshot: RemoteSnapshot = {
@@ -143,7 +153,8 @@ async function handle(request: Request): Promise<Response> {
       throw error;
     }
     return response(request, { snapshot });
-  } catch {
+  } catch (error) {
+    console.error('sync: failed', request.method, error instanceof Error ? error.message : error);
     return response(request, { error: 'Private sync is temporarily unavailable. Your local library is safe.' }, 503);
   }
 }

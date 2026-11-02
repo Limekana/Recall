@@ -68,12 +68,21 @@ export interface ImportRow {
   error?: string;
 }
 
+/** Records a deletion so sync can propagate it instead of resurrecting the item from another device. */
+export interface Tombstone {
+  id: string;
+  kind: 'set' | 'card';
+  deletedAt: number;
+}
+
 export interface RecallSnapshot {
   version: 1;
   sets: StudySet[];
   cards: Card[];
   progress: CardProgress[];
   sessions: StudySession[];
+  /** Optional so snapshots from older app builds stay valid. */
+  deleted?: Tombstone[];
 }
 
 export interface SyncMetadata {
