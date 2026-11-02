@@ -12,14 +12,23 @@ export function buildOptions(card: Card, cards: Card[], reverse: boolean, count 
   return seededShuffle([answer, ...selected], `${card.id}:answer-position`);
 }
 
+/**
+ * Written questions run the opposite way to multiple choice: by default you see the definition
+ * and type the term, because typing a whole definition word-for-word is rarely a fair test.
+ * The reverse toggle flips both.
+ */
+export function writtenReverse(reverse: boolean): boolean {
+  return !reverse;
+}
+
 export function buildLearnQuestion(
   card: Card,
   cards: Card[],
   progress: CardProgress,
   reverse: boolean
 ): TestQuestion {
-  const side = getCardSide(card, reverse);
   const kind = cards.length < 3 ? 'typed' : chooseQuestionKind(progress, card.id);
+  const side = getCardSide(card, kind === 'typed' ? writtenReverse(reverse) : reverse);
   return {
     id: `${card.id}:${progress.timesSeen}`,
     cardId: card.id,
@@ -39,9 +48,9 @@ export function buildTest(
 ): TestQuestion[] {
   const pool = seededShuffle(cards, seed).slice(0, Math.min(amount, cards.length));
   return pool.map((card, index) => {
-    const side = getCardSide(card, reverse);
     let kind = enabledKinds[index % enabledKinds.length] ?? 'typed';
     if (kind === 'choice' && cards.length < 3) kind = 'typed';
+    const side = getCardSide(card, kind === 'typed' ? writtenReverse(reverse) : reverse);
     if (kind === 'true-false') {
       const alternates = cards.filter((candidate) => getCardSide(candidate, reverse).answer !== side.answer);
       const alternate = alternates[seededNumber(`${seed}:${card.id}:alternate`) % Math.max(1, alternates.length)];

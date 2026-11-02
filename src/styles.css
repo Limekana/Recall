@@ -2090,3 +2090,4 @@ textarea::placeholder {
   .blast-typed input { min-height: 44px; font-size: 16px; }
   .blast-ghost .blast-shape i { border-radius: 5px; }
 }
+.modal-card__actions { flex-wrap: wrap; }

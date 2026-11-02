@@ -13,7 +13,7 @@ import {
 } from '../engine/blockBlast';
 import { EMPTY_PROGRESS } from '../engine/learningEngine';
 import { buildLearnQuestion } from '../engine/questions';
-import { isAnswerCorrect, seededShuffle } from '../lib/utils';
+import { gradeAnswer, seededShuffle } from '../lib/utils';
 import { useRecallStore } from '../store/useRecallStore';
 import type { CardProgress, TestQuestion } from '../types';
 
@@ -287,26 +287,27 @@ export function BlockBlastPage() {
     startedAt.current = Date.now();
   }
 
-  function rewardCorrect(pieces: BlastPiece[]) {
+  function rewardCorrect(pieces: BlastPiece[], note?: string) {
     const nextTray = chargeNextPiece(pieces);
     setTray(nextTray);
     setCorrectAnswers((value) => value + 1);
     setScore((value) => value + 50);
-    setFlash(nextTray.every((piece) => piece.charged) ? 'All three charged — place them!' : 'Charged! Drag it onto the board.');
+    setFlash(note ?? (nextTray.every((piece) => piece.charged) ? 'All three charged — place them!' : 'Charged! Drag it onto the board.'));
     window.clearTimeout(flashTimer.current);
-    flashTimer.current = window.setTimeout(() => setFlash(null), 1600);
+    flashTimer.current = window.setTimeout(() => setFlash(null), note ? 3200 : 1600);
     return nextTray;
   }
 
   function submitAnswer(given: string) {
     if (!active || miss) return;
     const { question } = active;
-    const correct = question.kind === 'typed' ? isAnswerCorrect(given, question.answer) : given === question.answer;
+    const typedGrade = question.kind === 'typed' ? gradeAnswer(given, question.answer) : null;
+    const correct = typedGrade ? typedGrade !== 'wrong' : given === question.answer;
     const before = useRecallStore.getState().progress[question.cardId];
     void answerCard(question.cardId, { correct, kind: question.kind, answeredAt: Date.now() });
     setAnswers((value) => value + 1);
     if (correct) {
-      askNext(cardQueue, rewardCorrect(tray));
+      askNext(cardQueue, rewardCorrect(tray, typedGrade === 'typo' ? `Close enough — it’s spelled “${question.answer}”.` : undefined));
       return;
     }
     weakCardIds.current.add(question.cardId);
@@ -482,7 +483,7 @@ export function BlockBlastPage() {
             </div>
           ) : question ? (
             <>
-              <div className="blast-recall__heading"><span>{question.kind === 'typed' ? 'Type the answer' : 'Choose the answer'}</span>{flash && <em className="blast-flash">{flash}</em>}</div>
+              <div className="blast-recall__heading"><span>{question.kind === 'typed' ? 'Type the term' : 'Choose the answer'}</span>{flash && <em className="blast-flash">{flash}</em>}</div>
               <h1>{question.prompt}</h1>
               {question.kind === 'typed' ? (
                 <form className="blast-typed" onSubmit={(event) => { event.preventDefault(); if (typedAnswer.trim()) submitAnswer(typedAnswer); }}>

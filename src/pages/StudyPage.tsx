@@ -12,9 +12,9 @@ import {
   X
 } from 'lucide-react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { EMPTY_PROGRESS } from '../engine/learningEngine';
+import { EMPTY_PROGRESS, orderForLearning } from '../engine/learningEngine';
 import { buildLearnQuestion } from '../engine/questions';
-import { getCardSide, isAnswerCorrect, seededShuffle } from '../lib/utils';
+import { getCardSide, gradeAnswer, seededShuffle } from '../lib/utils';
 import { useRecallStore } from '../store/useRecallStore';
 import type { CardProgress, QuestionKind, TestQuestion } from '../types';
 
@@ -26,6 +26,7 @@ interface Feedback {
   cardId: string;
   before: CardProgress | undefined;
   overridden?: boolean;
+  typo?: boolean;
 }
 
 export function StudyPage() {
@@ -43,7 +44,9 @@ export function StudyPage() {
   const targetedCards = requestedIds.length ? allCards.filter((card) => requestedIds.includes(card.id)) : allCards;
   const [reverse, setReverse] = useState(false);
   const [shuffle, setShuffle] = useState(false);
-  const [queue, setQueue] = useState<string[]>(() => targetedCards.map((card) => card.id));
+  // Learn starts with the weakest cards; flashcards keep set order.
+  const initialOrder = () => (mode === 'learn' ? orderForLearning(targetedCards, progress) : targetedCards).map((card) => card.id);
+  const [queue, setQueue] = useState<string[]>(initialOrder);
   const [position, setPosition] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
@@ -159,10 +162,10 @@ export function StudyPage() {
     setFeedback(null);
   }
 
-  async function gradeLearn(correct: boolean, kind: QuestionKind, given?: string) {
+  async function gradeLearn(correct: boolean, kind: QuestionKind, given?: string, typo = false) {
     if (!currentCard || !question || feedback) return;
     const before = progress[currentCard.id];
-    setFeedback({ correct, answer: question.answer, given, kind, cardId: currentCard.id, before });
+    setFeedback({ correct, answer: question.answer, given, kind, cardId: currentCard.id, before, typo });
     await answerCard(currentCard.id, { correct, kind, answeredAt: Date.now() });
     if (correct) setCorrectCount((value) => value + 1);
     else {
@@ -190,7 +193,8 @@ export function StudyPage() {
   function submitTyped(event: React.FormEvent) {
     event.preventDefault();
     if (!question || !typedAnswer.trim()) return;
-    void gradeLearn(isAnswerCorrect(typedAnswer, question.answer), 'typed', typedAnswer.trim());
+    const grade = gradeAnswer(typedAnswer, question.answer);
+    void gradeLearn(grade !== 'wrong', 'typed', typedAnswer.trim(), grade === 'typo');
   }
 
 
@@ -199,7 +203,7 @@ export function StudyPage() {
     gradedPosition.current = -1;
     setRound((value) => value + 1);
     startedAt.current = Date.now();
-    setQueue(shuffle ? seededShuffle(targetedCards.map((card) => card.id), `${Date.now()}`) : targetedCards.map((card) => card.id));
+    setQueue(shuffle ? seededShuffle(targetedCards.map((card) => card.id), `${Date.now()}`) : initialOrder());
     setPosition(0);
     setFlipped(false);
     setFeedback(null);
@@ -245,7 +249,7 @@ export function StudyPage() {
       {isLearn && question ? (
         <section className="learn-stage">
           <div className="learn-prompt">
-            <p className="eyebrow">{question.kind === 'typed' ? 'Type the answer' : 'Choose the answer'}</p>
+            <p className="eyebrow">{question.kind === 'typed' ? (reverse ? 'Type the definition' : 'Type the term') : 'Choose the answer'}</p>
             <h1>{question.prompt}</h1>
           </div>
 
@@ -272,8 +276,9 @@ export function StudyPage() {
             <div className={`answer-feedback${feedback.correct ? ' is-correct' : ' is-wrong'}`}>
               <div>{feedback.correct ? <Check size={22} /> : <X size={22} />}</div>
               <div>
-                <strong>{feedback.overridden ? 'Counted as correct' : feedback.correct ? 'Correct' : 'Not quite'}</strong>
-                {feedback.correct && !feedback.overridden && <span>That answer will return at a longer interval.</span>}
+                <strong>{feedback.overridden ? 'Counted as correct' : feedback.typo ? 'Correct — small typo' : feedback.correct ? 'Correct' : 'Not quite'}</strong>
+                {feedback.typo && <span>You wrote: {feedback.given} · Spelling: {feedback.answer}</span>}
+                {feedback.correct && !feedback.overridden && !feedback.typo && <span>That answer will return at a longer interval.</span>}
                 {feedback.given !== undefined && !feedback.correct && <span>You wrote: {feedback.given}</span>}
                 {(!feedback.correct || feedback.overridden) && <span>The answer is: {feedback.answer}</span>}
               </div>

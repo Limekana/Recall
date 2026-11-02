@@ -5,6 +5,7 @@ import { SetCard } from '../components/SetCard';
 import { SetEditor } from '../components/SetEditor';
 import { RecallMark } from '../components/RecallMark';
 import { getDueCards } from '../engine/learningEngine';
+import { sortByRecentActivity } from '../lib/activity';
 import { useRecallStore } from '../store/useRecallStore';
 
 function greeting(): string {
@@ -24,7 +25,10 @@ export function HomePage() {
   const sessions = useRecallStore((state) => state.sessions);
   const createSet = useRecallStore((state) => state.createSet);
   const createStarterSet = useRecallStore((state) => state.createStarterSet);
-  const activeSets = sets.filter((item) => !item.archived).sort((a, b) => b.updatedAt - a.updatedAt);
+  const activeSets = useMemo(
+    () => sortByRecentActivity(sets.filter((item) => !item.archived), cards, progress, sessions),
+    [cards, progress, sessions, sets]
+  );
   const dueCards = useMemo(() => getDueCards(cards, progress), [cards, progress]);
   const answered = Object.values(progress).reduce((sum, item) => sum + item.timesSeen, 0);
   const weekAgo = Date.now() - 7 * 86_400_000;
@@ -78,7 +82,7 @@ export function HomePage() {
             {dueCards.length ? (
               <Link to="/review" className="button button--accent">Review now <ArrowRight size={18} /></Link>
             ) : (
-              <Link to={`/sets/${activeSets[0].id}`} className="button button--accent">Open latest set <ArrowRight size={18} /></Link>
+              <Link to={`/sets/${activeSets[0].id}`} className="button button--accent">Open last studied <ArrowRight size={18} /></Link>
             )}
           </section>
 

@@ -5,6 +5,7 @@ import { PageHeader } from '../components/PageHeader';
 import { SetCard } from '../components/SetCard';
 import { SetEditor } from '../components/SetEditor';
 import { useRecallStore } from '../store/useRecallStore';
+import { sortByRecentActivity } from '../lib/activity';
 
 export function LibraryPage() {
   const navigate = useNavigate();
@@ -14,15 +15,16 @@ export function LibraryPage() {
   const sets = useRecallStore((state) => state.sets);
   const cards = useRecallStore((state) => state.cards);
   const progress = useRecallStore((state) => state.progress);
+  const sessions = useRecallStore((state) => state.sessions);
   const createSet = useRecallStore((state) => state.createSet);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
-    return sets
+    const matching = sets
       .filter((item) => item.archived === showArchived)
-      .filter((item) => !needle || `${item.title} ${item.subject} ${item.tags.join(' ')}`.toLocaleLowerCase().includes(needle))
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-  }, [query, sets, showArchived]);
+      .filter((item) => !needle || `${item.title} ${item.subject} ${item.tags.join(' ')}`.toLocaleLowerCase().includes(needle));
+    return sortByRecentActivity(matching, cards, progress, sessions);
+  }, [cards, progress, query, sessions, sets, showArchived]);
 
   return (
     <div className="page">

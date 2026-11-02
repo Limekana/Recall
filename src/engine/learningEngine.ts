@@ -71,3 +71,15 @@ export function masteryTone(mastery: number): 'strong' | 'building' | 'learning'
   if (mastery > 0) return 'learning';
   return 'new';
 }
+
+/**
+ * Learn-session order: weakest cards first (missed and low-mastery, with "difficult" stars
+ * counting as a little weaker), well-known cards last. Ties keep the set order.
+ */
+export function orderForLearning<T extends Pick<Card, 'id' | 'starred'>>(cards: T[], progress: Record<string, CardProgress>): T[] {
+  const weight = (card: T) => (progress[card.id]?.mastery ?? 0) - (card.starred ? 10 : 0);
+  return cards
+    .map((card, index) => ({ card, index, weight: weight(card) }))
+    .sort((a, b) => a.weight - b.weight || a.index - b.index)
+    .map(({ card }) => card);
+}

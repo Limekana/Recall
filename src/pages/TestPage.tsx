@@ -126,7 +126,7 @@ export function TestPage() {
               ))}
             </div>
           </div>
-          <label className="switch-row"><span><strong>Reverse direction</strong><small>Show definitions and answer with terms</small></span><input type="checkbox" checked={reverse} onChange={(event) => setReverse(event.target.checked)} /></label>
+          <label className="switch-row"><span><strong>Reverse direction</strong><small>Written questions normally ask for the term; reversing asks for definitions (and flips the other formats)</small></span><input type="checkbox" checked={reverse} onChange={(event) => setReverse(event.target.checked)} /></label>
           <button className="button button--accent button--full" onClick={startTest}>Start {amount}-question test <ArrowRight size={18} /></button>
         </section>
       </div>

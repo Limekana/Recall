@@ -3,7 +3,7 @@ import { ArrowRight, Check, CheckCircle2, Clock3, RefreshCw, ThumbsUp, X } from 
 import { Link } from 'react-router-dom';
 import { EMPTY_PROGRESS, getDueCards } from '../engine/learningEngine';
 import { buildLearnQuestion } from '../engine/questions';
-import { isAnswerCorrect } from '../lib/utils';
+import { gradeAnswer } from '../lib/utils';
 import { useRecallStore } from '../store/useRecallStore';
 import type { CardProgress, QuestionKind, TestQuestion } from '../types';
 
@@ -15,6 +15,7 @@ interface ReviewFeedback {
   cardId: string;
   before: CardProgress | undefined;
   overridden?: boolean;
+  typo?: boolean;
 }
 
 export function ReviewPage() {
@@ -87,10 +88,10 @@ export function ReviewPage() {
     saved.current = false;
   }
 
-  async function grade(correct: boolean, given?: string) {
+  async function grade(correct: boolean, given?: string, typo = false) {
     if (!current || !question || feedback) return;
     const before = progress[current.id];
-    setFeedback({ correct, answer: question.answer, given, kind: question.kind, cardId: current.id, before });
+    setFeedback({ correct, answer: question.answer, given, kind: question.kind, cardId: current.id, before, typo });
     await answerCard(current.id, { correct, kind: question.kind, answeredAt: Date.now() });
     if (correct) setCorrectCount((value) => value + 1);
     else setWeakIds((items) => [...items, current.id]);
@@ -135,7 +136,7 @@ export function ReviewPage() {
         </header>
         <div className="session-progress"><span style={{ width: `${Math.round((position / queue.length) * 100)}%` }} /></div>
         <section className="learn-stage review-question">
-          <div className="learn-prompt"><p className="eyebrow">{question.kind === 'typed' ? 'Recall it' : 'Recognize it'}</p><h1>{question.prompt}</h1></div>
+          <div className="learn-prompt"><p className="eyebrow">{question.kind === 'typed' ? 'Recall the term' : 'Recognize it'}</p><h1>{question.prompt}</h1></div>
           {question.kind === 'choice' ? (
             <div className="answer-grid">
               {question.options?.map((option, index) => (
@@ -145,7 +146,7 @@ export function ReviewPage() {
               ))}
             </div>
           ) : (
-            <form className="typed-answer" onSubmit={(event) => { event.preventDefault(); if (typedAnswer.trim()) void grade(isAnswerCorrect(typedAnswer, question.answer), typedAnswer.trim()); }}>
+            <form className="typed-answer" onSubmit={(event) => { event.preventDefault(); if (!typedAnswer.trim()) return; const result = gradeAnswer(typedAnswer, question.answer); void grade(result !== 'wrong', typedAnswer.trim(), result === 'typo'); }}>
               <input value={typedAnswer} onChange={(event) => setTypedAnswer(event.target.value)} placeholder="Type your answer…" disabled={Boolean(feedback)} autoFocus />
               {!feedback && <button className="button button--primary" disabled={!typedAnswer.trim()}>Check answer</button>}
             </form>
@@ -154,7 +155,8 @@ export function ReviewPage() {
             <div className={`answer-feedback${feedback.correct ? ' is-correct' : ' is-wrong'}`}>
               <div>{feedback.correct ? <Check size={22} /> : <X size={22} />}</div>
               <div>
-                <strong>{feedback.overridden ? 'Counted as correct' : feedback.correct ? 'Held strong' : 'Memory refreshed'}</strong>
+                <strong>{feedback.overridden ? 'Counted as correct' : feedback.typo ? 'Held strong — small typo' : feedback.correct ? 'Held strong' : 'Memory refreshed'}</strong>
+                {feedback.typo && <span>You wrote: {feedback.given} · Spelling: {feedback.answer}</span>}
                 {feedback.given !== undefined && !feedback.correct && <span>You wrote: {feedback.given}</span>}
                 <span>{feedback.correct && !feedback.overridden ? 'The next interval is longer.' : `Answer: ${feedback.answer}`}</span>
               </div>

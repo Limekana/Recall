@@ -23,18 +23,49 @@ function stripPunctuation(value: string): string {
   return value.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/** Optimal string alignment distance (Levenshtein plus adjacent transpositions). */
+export function editDistance(a: string, b: string): number {
+  const rows = a.length + 1;
+  const columns = b.length + 1;
+  const d: number[][] = Array.from({ length: rows }, (_, i) => Array.from({ length: columns }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < columns; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[rows - 1][columns - 1];
+}
+
+/** Typos allowed for an expected answer: none for short words or anything with digits. */
+function typoAllowance(expected: string): number {
+  if (/\d/.test(expected)) return 0;
+  const letters = expected.replace(/\s/g, '').length;
+  if (letters >= 12) return 2;
+  if (letters >= 5) return 1;
+  return 0;
+}
+
+export type AnswerGrade = 'correct' | 'typo' | 'wrong';
+
 /**
- * Lenient typed-answer check: case, diacritics, punctuation and extra spaces are ignored,
- * and parenthesised parts of the expected answer are optional ("mitochondria (organelle)").
- * Anything stricter is left to the learner's "I was right" override.
+ * Lenient typed-answer grading: case, diacritics, punctuation and extra spaces are ignored,
+ * parenthesised parts of the expected answer are optional ("mitochondria (organelle)"), and
+ * a small typo on longer answers counts as correct but is reported as 'typo'.
+ * Anything else is left to the learner's "I was right" override.
  */
-export function isAnswerCorrect(input: string, answer: string): boolean {
+export function gradeAnswer(input: string, answer: string): AnswerGrade {
   const given = stripPunctuation(normalizeAnswer(input));
-  if (!given) return false;
+  if (!given) return 'wrong';
   const expected = normalizeAnswer(answer);
-  if (given === stripPunctuation(expected)) return true;
-  const withoutAsides = stripPunctuation(expected.replace(/\([^)]*\)/g, ' '));
-  return Boolean(withoutAsides) && given === withoutAsides;
+  const variants = [stripPunctuation(expected), stripPunctuation(expected.replace(/\([^)]*\)/g, ' '))].filter(Boolean);
+  if (variants.includes(given)) return 'correct';
+  return variants.some((variant) => editDistance(given, variant) <= typoAllowance(variant)) ? 'typo' : 'wrong';
+}
+
+export function isAnswerCorrect(input: string, answer: string): boolean {
+  return gradeAnswer(input, answer) !== 'wrong';
 }
 
 export function seededNumber(value: string): number {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectDelimiter, isAnswerCorrect, parseImportText } from './utils';
+import { detectDelimiter, editDistance, gradeAnswer, isAnswerCorrect, parseImportText } from './utils';
 
 describe('spreadsheet import', () => {
   it('detects tab-separated rows', () => {
@@ -37,6 +37,24 @@ describe('answer comparison', () => {
     expect(isAnswerCorrect('well-known', 'well known')).toBe(true);
     expect(isAnswerCorrect('mitochondria', 'Mitochondria (organelle)')).toBe(true);
     expect(isAnswerCorrect('mitochondria organelle', 'Mitochondria (organelle)')).toBe(true);
+  });
+
+  it('accepts small typos on longer answers and reports them', () => {
+    expect(gradeAnswer('photosynthesis', 'Photosynthesis')).toBe('correct');
+    expect(gradeAnswer('photosynthsis', 'Photosynthesis')).toBe('typo');
+    expect(gradeAnswer('recieve', 'receive')).toBe('typo');
+    expect(gradeAnswer('fotosynthesis', 'photosynthesis')).toBe('typo');
+    expect(gradeAnswer('photosyn', 'photosynthesis')).toBe('wrong');
+  });
+
+  it('allows no typos on short words or numbers', () => {
+    expect(gradeAnswer('hen', 'hej')).toBe('wrong');
+    expect(gradeAnswer('1946', '1945')).toBe('wrong');
+  });
+
+  it('measures edit distance with transpositions', () => {
+    expect(editDistance('abcd', 'abdc')).toBe(1);
+    expect(editDistance('kitten', 'sitting')).toBe(3);
   });
 
   it('still rejects different or empty answers', () => {
