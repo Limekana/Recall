@@ -62,6 +62,20 @@ export function ReviewPage() {
     });
   }, [complete, correctCount, queue, recordSession, weakIds]);
 
+  useEffect(() => {
+    if (!feedback) return;
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLButtonElement | null;
+      if (event.key !== 'Enter' || (target?.tagName === 'BUTTON' && !target.disabled)) return;
+      event.preventDefault();
+      setPosition((value) => value + 1);
+      setTypedAnswer('');
+      setFeedback(null);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [feedback]);
+
   function start() {
     setQueue(dueCards.map((card) => card.id));
     setPosition(0);

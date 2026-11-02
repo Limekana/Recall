@@ -92,9 +92,9 @@ export function SetDetailPage() {
           {menuOpen && (
             <div className="context-menu">
               <button onClick={() => { setSetEditorOpen(true); setMenuOpen(false); }}><Edit3 size={16} /> Edit details</button>
-              <button onClick={async () => { const copy = await duplicateSet(setId); if (copy) navigate(`/sets/${copy.id}`); }}><Copy size={16} /> Duplicate</button>
-              <button onClick={() => void toggleArchiveSet(setId)}><Archive size={16} /> {studySet.archived ? 'Unarchive' : 'Archive'}</button>
-              <button className="danger" onClick={() => void removeSet()}><Trash2 size={16} /> Delete set</button>
+              <button onClick={async () => { setMenuOpen(false); const copy = await duplicateSet(setId); if (copy) navigate(`/sets/${copy.id}`); }}><Copy size={16} /> Duplicate</button>
+              <button onClick={() => { setMenuOpen(false); void toggleArchiveSet(setId); }}><Archive size={16} /> {studySet.archived ? 'Unarchive' : 'Archive'}</button>
+              <button className="danger" onClick={() => { setMenuOpen(false); void removeSet(); }}><Trash2 size={16} /> Delete set</button>
             </div>
           )}
         </div>

@@ -66,7 +66,9 @@ export const useRecallStore = create<RecallState>((set, get) => ({
     try {
       const data = await recallRepository.loadAll();
       const progress = Object.fromEntries(data.progress.map((item) => [item.cardId, item]));
-      set({ ...data, progress, ready: true, error: null });
+      // IndexedDB returns rows by primary key (random UUIDs); keep cards in the order they were added.
+      const cards = [...data.cards].sort((a, b) => a.createdAt - b.createdAt);
+      set({ ...data, cards, progress, ready: true, error: null });
     } catch (error) {
       set({ ready: true, error: error instanceof Error ? error.message : 'Could not open local storage.' });
     }

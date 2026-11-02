@@ -60,7 +60,8 @@ export function StudyPage() {
   const isComplete = queue.length > 0 && position >= queue.length;
   // Freeze the question for the current turn. Answering updates progress, which would otherwise
   // re-roll the question format (typed ↔ choice) while the feedback is still on screen.
-  const questionKey = isLearn && currentCard ? `${position}:${currentCard.id}:${reverse}` : '';
+  const [round, setRound] = useState(0);
+  const questionKey = isLearn && currentCard ? `${round}:${position}:${currentCard.id}:${reverse}` : '';
   const [frozenQuestion, setFrozenQuestion] = useState<{ key: string; question: TestQuestion | null }>({ key: '', question: null });
   if (frozenQuestion.key !== questionKey) {
     setFrozenQuestion({
@@ -90,14 +91,17 @@ export function StudyPage() {
     });
   }, [correctCount, isComplete, isLearn, recordSession, setId, targetedCards.length, weakIds]);
 
-  const advanceFlashcard = useCallback(async (correct: boolean) => {
-    if (!currentCard) return;
-    await answerCard(currentCard.id, { correct, kind: 'choice', answeredAt: Date.now() });
+  const gradedPosition = useRef(-1);
+  const advanceFlashcard = useCallback((correct: boolean) => {
+    // Ignore repeat key presses / swipes that land before the next card renders.
+    if (!currentCard || gradedPosition.current === position) return;
+    gradedPosition.current = position;
     if (correct) setCorrectCount((value) => value + 1);
     else setWeakIds((items) => [...items, currentCard.id]);
     setPosition((value) => value + 1);
     setFlipped(false);
-  }, [answerCard, currentCard]);
+    void answerCard(currentCard.id, { correct, kind: 'choice', answeredAt: Date.now() });
+  }, [answerCard, currentCard, position]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -106,8 +110,8 @@ export function StudyPage() {
         event.preventDefault();
         setFlipped((value) => !value);
       }
-      if (event.key === 'ArrowRight') void advanceFlashcard(true);
-      if (event.key === 'ArrowLeft') void advanceFlashcard(false);
+      if (event.key === 'ArrowRight') advanceFlashcard(true);
+      if (event.key === 'ArrowLeft') advanceFlashcard(false);
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -141,7 +145,15 @@ export function StudyPage() {
     const next = !shuffle;
     setShuffle(next);
     const remaining = queue.slice(position);
-    setQueue(next ? seededShuffle(remaining, `${setId}:${Date.now()}`) : targetedCards.map((card) => card.id));
+    if (next) {
+      setQueue(seededShuffle(remaining, `${setId}:${Date.now()}`));
+    } else {
+      // Un-shuffling keeps the cards still to go (in set order) instead of restarting the deck.
+      const order = new Map(targetedCards.map((card, index) => [card.id, index]));
+      setQueue([...remaining].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0)));
+    }
+    setRound((value) => value + 1);
+    gradedPosition.current = -1;
     setPosition(0);
     setFlipped(false);
     setFeedback(null);
@@ -184,6 +196,8 @@ export function StudyPage() {
 
   function restart() {
     sessionSaved.current = false;
+    gradedPosition.current = -1;
+    setRound((value) => value + 1);
     startedAt.current = Date.now();
     setQueue(shuffle ? seededShuffle(targetedCards.map((card) => card.id), `${Date.now()}`) : targetedCards.map((card) => card.id));
     setPosition(0);
@@ -281,7 +295,7 @@ export function StudyPage() {
             onTouchEnd={(event) => {
               if (touchStart === null) return;
               const movement = event.changedTouches[0].clientX - touchStart;
-              if (Math.abs(movement) > 70) void advanceFlashcard(movement > 0);
+              if (Math.abs(movement) > 70) advanceFlashcard(movement > 0);
               setTouchStart(null);
             }}
           >
@@ -289,8 +303,8 @@ export function StudyPage() {
             <span className="flip-card__face flip-card__back"><small>{reverse ? 'Term' : 'Definition'}</small><strong>{cardSide.answer}</strong><em>Tap to see the prompt</em></span>
           </button>
           <div className={`recall-controls${flipped ? ' is-visible' : ''}`} aria-hidden={!flipped}>
-            <button className="recall-button recall-button--again" disabled={!flipped} onClick={() => void advanceFlashcard(false)}><ArrowLeft size={19} /><span><small>Still learning</small>Show sooner</span></button>
-            <button className="recall-button recall-button--know" disabled={!flipped} onClick={() => void advanceFlashcard(true)}><span><small>Know it</small>Longer interval</span><ArrowRight size={19} /></button>
+            <button className="recall-button recall-button--again" disabled={!flipped} onClick={() => advanceFlashcard(false)}><ArrowLeft size={19} /><span><small>Still learning</small>Show sooner</span></button>
+            <button className="recall-button recall-button--know" disabled={!flipped} onClick={() => advanceFlashcard(true)}><span><small>Know it</small>Longer interval</span><ArrowRight size={19} /></button>
           </div>
           <p className="keyboard-hint"><Sparkles size={15} /> Space to flip · arrows to grade</p>
         </section>

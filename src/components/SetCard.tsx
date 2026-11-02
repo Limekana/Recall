@@ -9,9 +9,9 @@ export function SetCard({ studySet, cards, progress }: {
   cards: Card[];
   progress: Record<string, CardProgress>;
 }) {
-  const studied = cards.map((card) => progress[card.id]).filter(Boolean);
-  const mastery = studied.length
-    ? Math.round(studied.reduce((sum, item) => sum + item.mastery, 0) / studied.length)
+  // Unstudied cards count as 0, matching the set page and Progress page.
+  const mastery = cards.length
+    ? Math.round(cards.reduce((sum, card) => sum + (progress[card.id]?.mastery ?? 0), 0) / cards.length)
     : 0;
   const due = getDueCards(cards, progress).length;
   const starred = cards.filter((card) => card.starred).length;
