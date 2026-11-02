@@ -3,10 +3,12 @@ import { createHash } from 'node:crypto';
 import { hashSnapshot } from '../src/sync/syncEngine';
 import type { RecallSnapshot } from '../src/types';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), head: vi.fn(), put: vi.fn() }));
 vi.mock('@vercel/blob', () => ({
   get: mocks.get,
+  head: mocks.head,
   put: mocks.put,
+  BlobNotFoundError: class BlobNotFoundError extends Error {},
   BlobPreconditionFailedError: class BlobPreconditionFailedError extends Error {}
 }));
 
@@ -37,8 +39,12 @@ beforeEach(() => {
   mocks.get.mockReset().mockImplementation(async () => stored ? {
     statusCode: 200,
     stream: new Blob([stored]).stream(),
-    blob: { etag }
+    blob: { etag: `W/${etag}` }
   } : null);
+  mocks.head.mockReset().mockImplementation(async () => {
+    if (!stored) throw new (await import('@vercel/blob')).BlobNotFoundError('not found');
+    return { etag };
+  });
   mocks.put.mockReset().mockImplementation(async (_path, value: string, options) => {
     if (stored && (!options.allowOverwrite || options.ifMatch !== etag)) throw new Error('Precondition failed');
     stored = value;
@@ -97,6 +103,17 @@ describe('private sync function', () => {
     const origin = await handler.fetch(request('GET', undefined, 'https://untrusted.example'));
     expect(origin.status).toBe(403);
     expect(stored).toBeNull();
+  });
+});
+
+describe('private sync function overwrites', () => {
+  it('keeps writing after the first version even when downloads carry a weak ETag', async () => {
+    const payloadHash = await hashSnapshot(empty);
+    for (let revision = 0; revision < 3; revision += 1) {
+      const result = await handler.fetch(request('PUT', { payload: empty, payloadHash, deviceId: 'laptop', expectedRevision: revision }));
+      expect(result.status).toBe(200);
+      expect((await result.json()).snapshot.revision).toBe(revision + 1);
+    }
   });
 });
 

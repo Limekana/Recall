@@ -1,4 +1,4 @@
-import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
+import { get, head, put, BlobNotFoundError, BlobPreconditionFailedError } from '@vercel/blob';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import type { RecallSnapshot } from '../src/types';
 
@@ -81,6 +81,19 @@ function validSnapshot(snapshot: unknown): snapshot is RecallSnapshot {
     && (snapshot.deleted ?? []).every((item) => typeof item.id === 'string' && typeof item.deletedAt === 'number');
 }
 
+/**
+ * Authoritative ETag from the Blob API. The ETag on a CDN download can differ (e.g. weak `W/` tags
+ * on compressed responses), which made every conditional overwrite fail with a precondition error.
+ */
+async function currentEtag(): Promise<string | null> {
+  try {
+    return (await head(BLOB_PATH)).etag;
+  } catch (error) {
+    if (error instanceof BlobNotFoundError) return null;
+    throw error;
+  }
+}
+
 async function readRemote(): Promise<{ snapshot: RemoteSnapshot; etag: string } | null> {
   const result = await get(BLOB_PATH, { access: 'private', useCache: false });
   if (!result) return null;
@@ -129,7 +142,14 @@ async function handle(request: Request): Promise<Response> {
     if (await hashSnapshot(payload) !== payloadHash) {
       return response(request, { error: 'Library checksum did not match.' }, 400);
     }
+    // Take the lock token before reading: if anything writes in between, the token is stale and the
+    // conditional put below fails safely instead of overwriting newer data.
+    const lockEtag = await currentEtag();
     const current = await readRemote();
+    if (current && !lockEtag) {
+      console.info('sync: blob appeared between head and read');
+      return response(request, { error: 'The cloud copy changed on another device.' }, 409);
+    }
     if ((current?.snapshot.revision ?? 0) !== expectedRevision) {
       console.info('sync: stale revision', expectedRevision, 'current', current?.snapshot.revision ?? 0);
       return response(request, { error: 'The cloud copy changed on another device.' }, 409);
@@ -144,10 +164,11 @@ async function handle(request: Request): Promise<Response> {
     try {
       await put(BLOB_PATH, JSON.stringify(snapshot), {
         access: 'private', contentType: 'application/json',
-        ...(current ? { allowOverwrite: true, ifMatch: current.etag } : {})
+        ...(current && lockEtag ? { allowOverwrite: true, ifMatch: lockEtag } : {})
       });
     } catch (error) {
       if (error instanceof BlobPreconditionFailedError || (!current && await readRemote())) {
+        console.info('sync: conditional write rejected', error instanceof Error ? error.message : error);
         return response(request, { error: 'The cloud copy changed on another device.' }, 409);
       }
       throw error;

@@ -188,6 +188,8 @@ export const useSyncStore = create<SyncState>((set, get) => ({
           }
           return;
         }
+        // Back off and try once more on our own, so the message below stays true.
+        window.setTimeout(() => { if (activeKey === key) void get().syncNow(); }, 20_000);
         throw new Error('Another device kept changing the library. Sync will retry shortly.');
       } catch (error) {
         const message = messageFrom(error);
