@@ -36,7 +36,10 @@ interface RecallState {
   toggleStar: (cardId: string) => Promise<void>;
   deleteCard: (cardId: string) => Promise<void>;
   answerCard: (cardId: string, event: AnswerEvent) => Promise<CardProgress>;
+  /** Re-grade an answer: discard its effect by replaying `event` on the progress captured before it. */
+  reviseAnswer: (cardId: string, before: CardProgress | undefined, event: AnswerEvent) => Promise<CardProgress>;
   recordSession: (session: Omit<StudySession, 'id'>) => Promise<StudySession>;
+  updateSession: (session: StudySession) => Promise<void>;
 }
 
 function cardsFromInputs(setId: string, inputs: CardInput[], now = Date.now()): Card[] {
@@ -207,10 +210,22 @@ export const useRecallStore = create<RecallState>((set, get) => ({
     return updated;
   },
 
+  reviseAnswer: async (cardId, before, event) => {
+    const updated = applyAnswer(before, cardId, event);
+    await recallRepository.putProgress(updated);
+    set((state) => ({ progress: { ...state.progress, [cardId]: updated } }));
+    return updated;
+  },
+
   recordSession: async (input) => {
     const session: StudySession = { ...input, id: makeId('session') };
     await recallRepository.putSession(session);
     set((state) => ({ sessions: [session, ...state.sessions] }));
     return session;
+  },
+
+  updateSession: async (session) => {
+    await recallRepository.putSession(session);
+    set((state) => ({ sessions: state.sessions.map((item) => (item.id === session.id ? session : item)) }));
   }
 }));

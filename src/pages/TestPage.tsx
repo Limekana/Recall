@@ -1,10 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, ClipboardCheck, RotateCcw, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ClipboardCheck, RotateCcw, SlidersHorizontal, ThumbsUp, X } from 'lucide-react';
 import { Link, Navigate, useParams } from 'react-router-dom';
 import { buildTest } from '../engine/questions';
 import { isAnswerCorrect } from '../lib/utils';
 import { useRecallStore } from '../store/useRecallStore';
-import type { QuestionKind, TestQuestion } from '../types';
+import type { CardProgress, QuestionKind, StudySession, TestQuestion } from '../types';
 
 const kindLabels: Record<QuestionKind, string> = {
   choice: 'Multiple choice',
@@ -25,6 +25,8 @@ export function TestPage() {
   const cards = storedCards.filter((card) => card.setId === setId);
   const answerCard = useRecallStore((state) => state.answerCard);
   const recordSession = useRecallStore((state) => state.recordSession);
+  const reviseAnswer = useRecallStore((state) => state.reviseAnswer);
+  const updateSession = useRecallStore((state) => state.updateSession);
   const [amount, setAmount] = useState(Math.min(10, cards.length));
   const [kinds, setKinds] = useState<QuestionKind[]>(['choice', 'typed', 'true-false']);
   const [reverse, setReverse] = useState(false);
@@ -32,14 +34,18 @@ export function TestPage() {
   const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [overridden, setOverridden] = useState<string[]>([]);
   const startedAt = useRef(Date.now());
+  const progressBefore = useRef(new Map<string, CardProgress | undefined>());
+  const savedSession = useRef<StudySession | null>(null);
 
   const result = useMemo(() => {
     if (!questions || !submitted) return null;
-    const correct = questions.filter((question) => answerIsCorrect(question, answers[question.id]));
-    const weak = questions.filter((question) => !answerIsCorrect(question, answers[question.id]));
+    const isCounted = (question: TestQuestion) => overridden.includes(question.id) || answerIsCorrect(question, answers[question.id]);
+    const correct = questions.filter(isCounted);
+    const weak = questions.filter((question) => !isCounted(question));
     return { correct, weak, percentage: Math.round((correct.length / questions.length) * 100) };
-  }, [answers, questions, submitted]);
+  }, [answers, overridden, questions, submitted]);
 
   if (!studySet) return <Navigate to="/library" replace />;
   if (!cards.length) return <Navigate to={`/sets/${setId}`} replace />;
@@ -52,7 +58,20 @@ export function TestPage() {
     startedAt.current = Date.now();
     setQuestions(buildTest(cards, amount, kinds, reverse));
     setAnswers({});
+    setOverridden([]);
     setSubmitted(false);
+  }
+
+  async function overrideQuestion(question: TestQuestion) {
+    if (overridden.includes(question.id)) return;
+    setOverridden((items) => [...items, question.id]);
+    await reviseAnswer(question.cardId, progressBefore.current.get(question.cardId), { correct: true, kind: question.kind, answeredAt: Date.now() });
+    const session = savedSession.current;
+    if (session) {
+      const updated = { ...session, score: session.score + 1, weakCardIds: session.weakCardIds.filter((id) => id !== question.cardId) };
+      savedSession.current = updated;
+      await updateSession(updated);
+    }
   }
 
   async function submitTest() {
@@ -60,13 +79,15 @@ export function TestPage() {
     setSubmitting(true);
     const weakIds: string[] = [];
     let correct = 0;
+    progressBefore.current = new Map();
     for (const question of questions) {
+      progressBefore.current.set(question.cardId, useRecallStore.getState().progress[question.cardId]);
       const isCorrect = answerIsCorrect(question, answers[question.id]);
       if (isCorrect) correct += 1;
       else weakIds.push(question.cardId);
       await answerCard(question.cardId, { correct: isCorrect, kind: question.kind, answeredAt: Date.now() });
     }
-    await recordSession({
+    savedSession.current = await recordSession({
       setId,
       mode: 'test',
       startedAt: startedAt.current,
@@ -134,7 +155,13 @@ export function TestPage() {
           <section className="result-breakdown">
             <div className="section-heading"><div><p className="eyebrow">Needs another look</p><h2>{result.weak.length} missed {result.weak.length === 1 ? 'question' : 'questions'}</h2></div></div>
             {result.weak.map((question) => (
-              <div className="result-row" key={question.id}><X size={18} /><div><strong>{question.prompt}</strong><span>Your answer: {String(answers[question.id] ?? 'No answer')}</span><em>Correct: {question.answer}</em></div></div>
+              <div className="result-row" key={question.id}>
+                <X size={18} />
+                <div><strong>{question.prompt}</strong><span>Your answer: {String(answers[question.id] ?? 'No answer')}</span><em>Correct: {question.answer}</em></div>
+                {question.kind === 'typed' && typeof answers[question.id] === 'string' && String(answers[question.id]).trim() && (
+                  <button className="button button--secondary result-row__override" onClick={() => void overrideQuestion(question)}><ThumbsUp size={15} /> I was right</button>
+                )}
+              </div>
             ))}
           </section>
         )}

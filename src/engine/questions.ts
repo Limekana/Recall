@@ -43,15 +43,17 @@ export function buildTest(
     let kind = enabledKinds[index % enabledKinds.length] ?? 'typed';
     if (kind === 'choice' && cards.length < 3) kind = 'typed';
     if (kind === 'true-false') {
-      const shouldBeTrue = seededNumber(`${seed}:${card.id}`) % 2 === 0;
-      const alternate = cards.find((candidate) => candidate.id !== card.id) ?? card;
+      const alternates = cards.filter((candidate) => getCardSide(candidate, reverse).answer !== side.answer);
+      const alternate = alternates[seededNumber(`${seed}:${card.id}:alternate`) % Math.max(1, alternates.length)];
+      // Without a genuinely different answer to show, the statement can only be true.
+      const shouldBeTrue = !alternate || seededNumber(`${seed}:${card.id}`) % 2 === 0;
       return {
         id: `${seed}:${card.id}`,
         cardId: card.id,
         kind,
         prompt: side.prompt,
         answer: side.answer,
-        shownStatement: shouldBeTrue ? side.answer : getCardSide(alternate, reverse).answer,
+        shownStatement: shouldBeTrue || !alternate ? side.answer : getCardSide(alternate, reverse).answer,
         expectedBoolean: shouldBeTrue
       };
     }

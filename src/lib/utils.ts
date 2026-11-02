@@ -19,8 +19,22 @@ export function normalizeAnswer(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
+function stripPunctuation(value: string): string {
+  return value.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Lenient typed-answer check: case, diacritics, punctuation and extra spaces are ignored,
+ * and parenthesised parts of the expected answer are optional ("mitochondria (organelle)").
+ * Anything stricter is left to the learner's "I was right" override.
+ */
 export function isAnswerCorrect(input: string, answer: string): boolean {
-  return normalizeAnswer(input) === normalizeAnswer(answer);
+  const given = stripPunctuation(normalizeAnswer(input));
+  if (!given) return false;
+  const expected = normalizeAnswer(answer);
+  if (given === stripPunctuation(expected)) return true;
+  const withoutAsides = stripPunctuation(expected.replace(/\([^)]*\)/g, ' '));
+  return Boolean(withoutAsides) && given === withoutAsides;
 }
 
 export function seededNumber(value: string): number {

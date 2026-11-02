@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -8,6 +8,7 @@ import {
   RotateCcw,
   Shuffle,
   Sparkles,
+  ThumbsUp,
   X
 } from 'lucide-react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -15,11 +16,16 @@ import { EMPTY_PROGRESS } from '../engine/learningEngine';
 import { buildLearnQuestion } from '../engine/questions';
 import { getCardSide, isAnswerCorrect, seededShuffle } from '../lib/utils';
 import { useRecallStore } from '../store/useRecallStore';
-import type { QuestionKind } from '../types';
+import type { CardProgress, QuestionKind, TestQuestion } from '../types';
 
 interface Feedback {
   correct: boolean;
   answer: string;
+  given?: string;
+  kind: QuestionKind;
+  cardId: string;
+  before: CardProgress | undefined;
+  overridden?: boolean;
 }
 
 export function StudyPage() {
@@ -31,6 +37,7 @@ export function StudyPage() {
   const allCards = storedCards.filter((card) => card.setId === setId);
   const progress = useRecallStore((state) => state.progress);
   const answerCard = useRecallStore((state) => state.answerCard);
+  const reviseAnswer = useRecallStore((state) => state.reviseAnswer);
   const recordSession = useRecallStore((state) => state.recordSession);
   const requestedIds = searchParams.get('cards')?.split(',').filter(Boolean) ?? [];
   const targetedCards = requestedIds.length ? allCards.filter((card) => requestedIds.includes(card.id)) : allCards;
@@ -51,10 +58,19 @@ export function StudyPage() {
   const currentId = queue[position];
   const currentCard = allCards.find((card) => card.id === currentId);
   const isComplete = queue.length > 0 && position >= queue.length;
-  const question = useMemo(() => {
-    if (!currentCard || !isLearn) return null;
-    return buildLearnQuestion(currentCard, allCards, progress[currentCard.id] ?? EMPTY_PROGRESS(currentCard.id), reverse);
-  }, [allCards, currentCard, isLearn, progress, reverse]);
+  // Freeze the question for the current turn. Answering updates progress, which would otherwise
+  // re-roll the question format (typed ↔ choice) while the feedback is still on screen.
+  const questionKey = isLearn && currentCard ? `${position}:${currentCard.id}:${reverse}` : '';
+  const [frozenQuestion, setFrozenQuestion] = useState<{ key: string; question: TestQuestion | null }>({ key: '', question: null });
+  if (frozenQuestion.key !== questionKey) {
+    setFrozenQuestion({
+      key: questionKey,
+      question: questionKey && currentCard
+        ? buildLearnQuestion(currentCard, allCards, progress[currentCard.id] ?? EMPTY_PROGRESS(currentCard.id), reverse)
+        : null
+    });
+  }
+  const question = frozenQuestion.key === questionKey ? frozenQuestion.question : null;
 
   useEffect(() => {
     if (question?.kind === 'typed' && !feedback) typedInput.current?.focus();
@@ -97,6 +113,26 @@ export function StudyPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [advanceFlashcard, isComplete, isLearn]);
 
+  const nextLearn = useCallback(() => {
+    setPosition((value) => value + 1);
+    setFeedback(null);
+    setTypedAnswer('');
+  }, []);
+
+  useEffect(() => {
+    if (!isLearn || !feedback) return;
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLButtonElement | null;
+      // An enabled focused button (e.g. "I was right") handles Enter itself.
+      if (event.key !== 'Enter' || (target?.tagName === 'BUTTON' && !target.disabled)) return;
+      event.preventDefault();
+      nextLearn();
+    }
+    // Registered after the submitting keydown has finished dispatching, so it can't skip the feedback.
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [feedback, isLearn, nextLearn]);
+
   if (!studySet) return <Navigate to="/library" replace />;
   if (!targetedCards.length) return <Navigate to={`/sets/${setId}`} replace />;
   if (mode !== 'flashcards' && mode !== 'learn') return <Navigate to={`/sets/${setId}`} replace />;
@@ -111,10 +147,11 @@ export function StudyPage() {
     setFeedback(null);
   }
 
-  async function gradeLearn(correct: boolean, kind: QuestionKind) {
+  async function gradeLearn(correct: boolean, kind: QuestionKind, given?: string) {
     if (!currentCard || !question || feedback) return;
+    const before = progress[currentCard.id];
+    setFeedback({ correct, answer: question.answer, given, kind, cardId: currentCard.id, before });
     await answerCard(currentCard.id, { correct, kind, answeredAt: Date.now() });
-    setFeedback({ correct, answer: question.answer });
     if (correct) setCorrectCount((value) => value + 1);
     else {
       setWeakIds((items) => [...items, currentCard.id]);
@@ -122,17 +159,28 @@ export function StudyPage() {
     }
   }
 
+  async function overrideLearn() {
+    if (!feedback || feedback.correct) return;
+    const { cardId, before, kind } = feedback;
+    setFeedback({ ...feedback, correct: true, overridden: true });
+    await reviseAnswer(cardId, before, { correct: true, kind, answeredAt: Date.now() });
+    setCorrectCount((value) => value + 1);
+    setWeakIds((items) => {
+      const index = items.lastIndexOf(cardId);
+      return index < 0 ? items : [...items.slice(0, index), ...items.slice(index + 1)];
+    });
+    setQueue((items) => {
+      const index = items.lastIndexOf(cardId);
+      return index > position ? [...items.slice(0, index), ...items.slice(index + 1)] : items;
+    });
+  }
+
   function submitTyped(event: React.FormEvent) {
     event.preventDefault();
     if (!question || !typedAnswer.trim()) return;
-    void gradeLearn(isAnswerCorrect(typedAnswer, question.answer), 'typed');
+    void gradeLearn(isAnswerCorrect(typedAnswer, question.answer), 'typed', typedAnswer.trim());
   }
 
-  function nextLearn() {
-    setPosition((value) => value + 1);
-    setFeedback(null);
-    setTypedAnswer('');
-  }
 
   function restart() {
     sessionSaved.current = false;
@@ -209,8 +257,18 @@ export function StudyPage() {
           {feedback && (
             <div className={`answer-feedback${feedback.correct ? ' is-correct' : ' is-wrong'}`}>
               <div>{feedback.correct ? <Check size={22} /> : <X size={22} />}</div>
-              <div><strong>{feedback.correct ? 'Correct' : 'Not quite'}</strong><span>{feedback.correct ? 'That answer will return at a longer interval.' : `The answer is: ${feedback.answer}`}</span></div>
-              <button className="button button--primary" onClick={nextLearn}>Continue <ArrowRight size={17} /></button>
+              <div>
+                <strong>{feedback.overridden ? 'Counted as correct' : feedback.correct ? 'Correct' : 'Not quite'}</strong>
+                {feedback.correct && !feedback.overridden && <span>That answer will return at a longer interval.</span>}
+                {feedback.given !== undefined && !feedback.correct && <span>You wrote: {feedback.given}</span>}
+                {(!feedback.correct || feedback.overridden) && <span>The answer is: {feedback.answer}</span>}
+              </div>
+              <div className="answer-feedback__actions">
+                {!feedback.correct && feedback.kind === 'typed' && (
+                  <button className="button button--secondary" onClick={() => void overrideLearn()}><ThumbsUp size={16} /> I was right</button>
+                )}
+                <button className="button button--primary" onClick={nextLearn}>Continue <ArrowRight size={17} /></button>
+              </div>
             </div>
           )}
         </section>

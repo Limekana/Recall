@@ -31,4 +31,16 @@ describe('answer comparison', () => {
   it('ignores case, surrounding whitespace, and diacritics', () => {
     expect(isAnswerCorrect('  résumé ', 'Resume')).toBe(true);
   });
+
+  it('ignores punctuation and treats parenthesised asides as optional', () => {
+    expect(isAnswerCorrect('thank you', 'Thank you!')).toBe(true);
+    expect(isAnswerCorrect('well-known', 'well known')).toBe(true);
+    expect(isAnswerCorrect('mitochondria', 'Mitochondria (organelle)')).toBe(true);
+    expect(isAnswerCorrect('mitochondria organelle', 'Mitochondria (organelle)')).toBe(true);
+  });
+
+  it('still rejects different or empty answers', () => {
+    expect(isAnswerCorrect('hello', 'goodbye')).toBe(false);
+    expect(isAnswerCorrect('!!!', 'Hi')).toBe(false);
+  });
 });

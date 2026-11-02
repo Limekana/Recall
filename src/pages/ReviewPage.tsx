@@ -1,22 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Check, CheckCircle2, Clock3, RefreshCw, X } from 'lucide-react';
+import { ArrowRight, Check, CheckCircle2, Clock3, RefreshCw, ThumbsUp, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { EMPTY_PROGRESS, getDueCards } from '../engine/learningEngine';
 import { buildLearnQuestion } from '../engine/questions';
 import { isAnswerCorrect } from '../lib/utils';
 import { useRecallStore } from '../store/useRecallStore';
+import type { CardProgress, QuestionKind, TestQuestion } from '../types';
+
+interface ReviewFeedback {
+  correct: boolean;
+  answer: string;
+  given?: string;
+  kind: QuestionKind;
+  cardId: string;
+  before: CardProgress | undefined;
+  overridden?: boolean;
+}
 
 export function ReviewPage() {
   const storedCards = useRecallStore((state) => state.cards);
   const sets = useRecallStore((state) => state.sets);
   const progress = useRecallStore((state) => state.progress);
   const answerCard = useRecallStore((state) => state.answerCard);
+  const reviseAnswer = useRecallStore((state) => state.reviseAnswer);
   const recordSession = useRecallStore((state) => state.recordSession);
   const dueCards = useMemo(() => getDueCards(storedCards, progress), [storedCards, progress]);
   const [queue, setQueue] = useState<string[] | null>(null);
   const [position, setPosition] = useState(0);
   const [typedAnswer, setTypedAnswer] = useState('');
-  const [feedback, setFeedback] = useState<{ correct: boolean; answer: string } | null>(null);
+  const [feedback, setFeedback] = useState<ReviewFeedback | null>(null);
   const [correctCount, setCorrectCount] = useState(0);
   const [weakIds, setWeakIds] = useState<string[]>([]);
   const startedAt = useRef(Date.now());
@@ -24,7 +36,16 @@ export function ReviewPage() {
   const current = storedCards.find((card) => card.id === queue?.[position]);
   const currentSet = sets.find((item) => item.id === current?.setId);
   const setCards = current ? storedCards.filter((card) => card.setId === current.setId) : [];
-  const question = current ? buildLearnQuestion(current, setCards, progress[current.id] ?? EMPTY_PROGRESS(current.id), false) : null;
+  // Freeze per turn so grading (which updates progress) can't re-roll the question format.
+  const questionKey = current ? `${position}:${current.id}` : '';
+  const [frozenQuestion, setFrozenQuestion] = useState<{ key: string; question: TestQuestion | null }>({ key: '', question: null });
+  if (frozenQuestion.key !== questionKey) {
+    setFrozenQuestion({
+      key: questionKey,
+      question: current ? buildLearnQuestion(current, setCards, progress[current.id] ?? EMPTY_PROGRESS(current.id), false) : null
+    });
+  }
+  const question = frozenQuestion.key === questionKey ? frozenQuestion.question : null;
   const complete = queue !== null && position >= queue.length;
 
   useEffect(() => {
@@ -44,18 +65,30 @@ export function ReviewPage() {
   function start() {
     setQueue(dueCards.map((card) => card.id));
     setPosition(0);
+    setTypedAnswer('');
+    setFeedback(null);
     setCorrectCount(0);
     setWeakIds([]);
     startedAt.current = Date.now();
     saved.current = false;
   }
 
-  async function grade(correct: boolean) {
+  async function grade(correct: boolean, given?: string) {
     if (!current || !question || feedback) return;
+    const before = progress[current.id];
+    setFeedback({ correct, answer: question.answer, given, kind: question.kind, cardId: current.id, before });
     await answerCard(current.id, { correct, kind: question.kind, answeredAt: Date.now() });
-    setFeedback({ correct, answer: question.answer });
     if (correct) setCorrectCount((value) => value + 1);
     else setWeakIds((items) => [...items, current.id]);
+  }
+
+  async function override() {
+    if (!feedback || feedback.correct) return;
+    const { cardId, before, kind } = feedback;
+    setFeedback({ ...feedback, correct: true, overridden: true });
+    await reviseAnswer(cardId, before, { correct: true, kind, answeredAt: Date.now() });
+    setCorrectCount((value) => value + 1);
+    setWeakIds((items) => items.filter((id) => id !== cardId));
   }
 
   function next() {
@@ -98,7 +131,7 @@ export function ReviewPage() {
               ))}
             </div>
           ) : (
-            <form className="typed-answer" onSubmit={(event) => { event.preventDefault(); if (typedAnswer.trim()) void grade(isAnswerCorrect(typedAnswer, question.answer)); }}>
+            <form className="typed-answer" onSubmit={(event) => { event.preventDefault(); if (typedAnswer.trim()) void grade(isAnswerCorrect(typedAnswer, question.answer), typedAnswer.trim()); }}>
               <input value={typedAnswer} onChange={(event) => setTypedAnswer(event.target.value)} placeholder="Type your answer…" disabled={Boolean(feedback)} autoFocus />
               {!feedback && <button className="button button--primary" disabled={!typedAnswer.trim()}>Check answer</button>}
             </form>
@@ -106,8 +139,17 @@ export function ReviewPage() {
           {feedback && (
             <div className={`answer-feedback${feedback.correct ? ' is-correct' : ' is-wrong'}`}>
               <div>{feedback.correct ? <Check size={22} /> : <X size={22} />}</div>
-              <div><strong>{feedback.correct ? 'Held strong' : 'Memory refreshed'}</strong><span>{feedback.correct ? 'The next interval is longer.' : `Answer: ${feedback.answer}`}</span></div>
-              <button className="button button--primary" onClick={next}>Next <ArrowRight size={17} /></button>
+              <div>
+                <strong>{feedback.overridden ? 'Counted as correct' : feedback.correct ? 'Held strong' : 'Memory refreshed'}</strong>
+                {feedback.given !== undefined && !feedback.correct && <span>You wrote: {feedback.given}</span>}
+                <span>{feedback.correct && !feedback.overridden ? 'The next interval is longer.' : `Answer: ${feedback.answer}`}</span>
+              </div>
+              <div className="answer-feedback__actions">
+                {!feedback.correct && feedback.kind === 'typed' && (
+                  <button className="button button--secondary" onClick={() => void override()}><ThumbsUp size={16} /> I was right</button>
+                )}
+                <button className="button button--primary" onClick={next}>Next <ArrowRight size={17} /></button>
+              </div>
             </div>
           )}
         </section>
